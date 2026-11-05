@@ -18,11 +18,12 @@ import {
   saveGame,
   UnauthorizedError,
   uploadImage,
+  uploadVideo,
   verifyAdmin,
 } from "../utils/gameStore";
 
 const MIN_PAIRS = 2;
-const MIN_ANSWERS = 1;
+const MIN_ANSWERS = 2;
 // รหัสผู้ดูแลเก็บไว้แค่ใน tab นี้ ปิด tab แล้วต้องใส่ใหม่
 const SECRET_KEY = "idojo.adminSecret";
 
@@ -41,6 +42,11 @@ function writeSecret(value: string) {
   } catch {
     // ไม่มี sessionStorage ก็ใช้แค่ใน state
   }
+}
+
+// ลบตัวเลือกที่ถูกไปแล้วต้องไม่เหลือข้อที่ไม่มีคำตอบถูก — ให้ตัวแรกเป็นตัวถูกแทน
+function keepOneCorrect(answers: AnswerOption[]): AnswerOption[] {
+  return answers.some((a) => a.correct) ? answers : answers.map((a, i) => ({ ...a, correct: i === 0 }));
 }
 
 function errorText(e: unknown, fallback: string): string {
@@ -152,6 +158,78 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
   );
 }
 
+interface VideoFieldProps {
+  video?: string;
+  onVideo: (v: string | undefined) => void;
+  // throw Error = แสดงข้อความตรงกล่อง VDO · คืน undefined = ไม่ต้องทำอะไร (เช่น ต้องใส่รหัสใหม่)
+  onUpload: (file: File, onProgress: (pct: number) => void) => Promise<string | undefined>;
+}
+
+function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  // error แสดงตรงกล่อง VDO เลย (status ด้านล่างสุดของหน้าอยู่ไกลและหายเร็ว ผู้ดูแลมักไม่เห็น)
+  const [error, setError] = useState<string | null>(null);
+  async function handleUpload(file: File | null) {
+    if (!file) return;
+    setProgress(0);
+    setError(null);
+    try {
+      const url = await onUpload(file, setProgress);
+      if (url) onVideo(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "อัปโหลด VDO ไม่สำเร็จ");
+    } finally {
+      setProgress(null);
+    }
+  }
+  return (
+    <div className="space-y-2 rounded-sm border border-f1-line bg-zinc-50 p-3 text-sm text-zinc-700">
+      <p className="f1-font-display text-sm font-bold text-f1-ink">🎬 VDO ของข้อนี้</p>
+      <p className="text-xs text-f1-mute">
+        ผู้เล่นต้องดูจนจบ (ข้ามไม่ได้) ก่อนจะเห็นตัวเลือกคำตอบ · รองรับ .mp4 .webm (แนะนำ mp4 H.264) · ถ้าไม่ใส่ VDO จะแสดงตัวเลือกทันที
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        {video && <video src={video} controls preload="metadata" className="h-24 rounded-sm border-2 border-f1-line bg-black" />}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="video/mp4,video/webm,video/ogg,.mp4,.m4v,.webm,.ogv"
+          className="hidden"
+          disabled={progress !== null}
+          onChange={(e) => {
+            handleUpload(e.target.files?.[0] ?? null);
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={progress !== null}
+          className="f1-font-display bg-[#DC0000] text-white hover:bg-[#b00000]"
+          onClick={() => fileRef.current?.click()}
+        >
+          🎞️ {video ? "เปลี่ยน VDO" : "เลือก VDO จากเครื่อง"}
+        </Button>
+        <span className="text-xs text-f1-mute">
+          {progress !== null ? `กำลังอัปโหลด ${progress}%${progress >= 100 ? " (รอ server บันทึก…)" : ""}` : video ? "มี VDO แล้ว" : "ยังไม่มี VDO"}
+        </span>
+        {error && <p className="w-full text-sm font-bold text-f1-bad">⚠️ {error}</p>}
+        {video && progress === null && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-[#DC0000] hover:bg-[#DC0000]/10 hover:text-[#B00000]"
+            onClick={() => onVideo(undefined)}
+          >
+            ลบ VDO
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function EditPage() {
   const navigate = useNavigate();
   const [secret, setSecret] = useState<string>(readSecret);
@@ -224,6 +302,22 @@ export function EditPage() {
       if (e instanceof UnauthorizedError) forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
       else setStatus(errorText(e, "อัปโหลดรูปไม่สำเร็จ"));
       return undefined;
+    }
+  }
+
+  async function handleUploadVideo(file: File, onProgress: (pct: number) => void): Promise<string | undefined> {
+    try {
+      return await uploadVideo(file, secret, onProgress);
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
+        return undefined;
+      }
+      // 404 = backend ยังรันโค้ดเก่า (ไม่มี route อัปโหลด VDO) ต้อง restart
+      if (e instanceof Error && /\(404\)/.test(e.message)) {
+        throw new Error("server ไม่รู้จักการอัปโหลด VDO (404) — ต้อง restart backend ให้ใช้โค้ดล่าสุดก่อน");
+      }
+      throw e;
     }
   }
 
@@ -314,6 +408,20 @@ export function EditPage() {
     );
   }
 
+  // ติ๊กตัวเลือกที่ถูก — ถูกได้ตัวเดียว
+  function setCorrectAnswer(pairId: string, answerId: string) {
+    setGame((prev) =>
+      prev
+        ? {
+            ...prev,
+            pairs: prev.pairs.map((p) =>
+              p.id === pairId ? { ...p, answers: p.answers.map((a) => ({ ...a, correct: a.id === answerId })) } : p,
+            ),
+          }
+        : prev,
+    );
+  }
+
   function addAnswer(pairId: string) {
     setGame((prev) =>
       prev
@@ -334,7 +442,7 @@ export function EditPage() {
             ...prev,
             pairs: prev.pairs.map((p) =>
               p.id === pairId && p.answers.length > MIN_ANSWERS
-                ? { ...p, answers: p.answers.filter((a) => a.id !== answerId) }
+                ? { ...p, answers: keepOneCorrect(p.answers.filter((a) => a.id !== answerId)) }
                 : p,
             ),
           }
@@ -347,7 +455,7 @@ export function EditPage() {
     const badIndex = game.pairs.findIndex((p) => !isPairComplete(p));
     if (badIndex !== -1) {
       setStatus(
-        `คู่ที่ ${badIndex + 1} ยังไม่ครบ: ประเภทข้อความต้องมีข้อความ, ประเภทรูปภาพต้องมีรูป, ประเภทผสมต้องมีทั้งสองอย่าง`,
+        `ข้อที่ ${badIndex + 1} ยังไม่ครบ: ต้องมีคำถาม และตัวเลือกอย่างน้อย 2 ตัวที่กรอกครบ (ประเภทข้อความต้องมีข้อความ, ประเภทรูปภาพต้องมีรูป, ประเภทผสมต้องมีทั้งสองอย่าง) และเลือกตัวที่ถูก 1 ตัว`,
       );
       return;
     }
@@ -384,7 +492,7 @@ export function EditPage() {
     try {
       const pairs = parseImportedPairs(await file.text());
       setGame({ ...game, pairs });
-      setStatus(`นำเข้า ${pairs.length} คู่แล้ว`);
+      setStatus(`นำเข้า ${pairs.length} ข้อแล้ว`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "นำเข้าไฟล์ไม่สำเร็จ");
     }
@@ -409,7 +517,7 @@ export function EditPage() {
             />
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
-            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด)</span>
+            <span>จำกัดเวลารวมทั้งเกม (วินาที, 0 = ไม่จำกัด · ไม่นับเวลาดู VDO)</span>
             <Input
               type="number"
               min={0}
@@ -427,12 +535,12 @@ export function EditPage() {
           </label>
         </div>
 
-        <h2 className="f1-font-display text-sm font-bold text-f1-ink">คู่ที่ต้องจับคู่</h2>
+        <h2 className="f1-font-display text-sm font-bold text-f1-ink">คำถามแต่ละข้อ (เล่นเรียงตามลำดับ)</h2>
 
         {game.pairs.map((pair, idx) => (
           <div key={pair.id} className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4">
             <div className="flex items-center justify-between">
-              <span className="f1-font-display text-f1-ink">คู่ที่ {idx + 1}</span>
+              <span className="f1-font-display text-f1-ink">ข้อที่ {idx + 1}</span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -440,13 +548,19 @@ export function EditPage() {
                 disabled={game.pairs.length <= MIN_PAIRS}
                 onClick={() => removePair(pair.id)}
               >
-                ลบคู่นี้
+                ลบข้อนี้
               </Button>
             </div>
 
+            <VideoField
+              video={pair.video}
+              onVideo={(v) => updatePair(pair.id, { video: v })}
+              onUpload={handleUploadVideo}
+            />
+
             <div className="grid gap-3 md:grid-cols-2">
               <SideFields
-                title="📝 คำถาม (ซ้าย)"
+                title="📝 คำถาม"
                 type={pair.promptType}
                 text={pair.promptText}
                 image={pair.promptImage}
@@ -459,7 +573,17 @@ export function EditPage() {
                 {pair.answers.map((answer, aIdx) => (
                   <div key={answer.id} className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="f1-font-mono text-xs text-f1-mute">คำตอบที่ {aIdx + 1}</span>
+                      <label className="f1-font-mono flex cursor-pointer items-center gap-2 text-xs text-f1-mute">
+                        <input
+                          type="radio"
+                          name={`correct-${pair.id}`}
+                          checked={Boolean(answer.correct)}
+                          onChange={() => setCorrectAnswer(pair.id, answer.id)}
+                          className="accent-[#15803D]"
+                        />
+                        ตัวเลือกที่ {aIdx + 1}
+                        {answer.correct && <strong className="text-[#15803D]">✓ คำตอบที่ถูก</strong>}
+                      </label>
                       {pair.answers.length > MIN_ANSWERS && (
                         <Button
                           variant="ghost"
@@ -467,12 +591,12 @@ export function EditPage() {
                           className="h-6 px-2 text-xs text-[#DC0000] hover:bg-[#DC0000]/10 hover:text-[#B00000]"
                           onClick={() => removeAnswer(pair.id, answer.id)}
                         >
-                          ลบคำตอบนี้
+                          ลบตัวเลือกนี้
                         </Button>
                       )}
                     </div>
                     <SideFields
-                      title={aIdx === 0 ? "✅ คำตอบ (ขวา)" : `✅ คำตอบ (ขวา) #${aIdx + 1}`}
+                      title={`✅ ตัวเลือก #${aIdx + 1}`}
                       type={answer.type}
                       text={answer.text}
                       image={answer.image}
@@ -489,7 +613,7 @@ export function EditPage() {
                   className="border-[#DC0000] bg-white text-[#DC0000] hover:bg-[#DC0000]/10"
                   onClick={() => addAnswer(pair.id)}
                 >
-                  + เพิ่มคำตอบ
+                  + เพิ่มตัวเลือก
                 </Button>
               </div>
             </div>
@@ -501,7 +625,7 @@ export function EditPage() {
           className="border-[#DC0000] bg-white text-[#DC0000] hover:bg-[#DC0000]/10"
           onClick={addPair}
         >
-          + เพิ่มคู่จับคู่
+          + เพิ่มข้อ
         </Button>
 
         <div className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4">

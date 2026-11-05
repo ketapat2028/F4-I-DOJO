@@ -63,6 +63,44 @@ function uploadImageField(req, res, next) {
   });
 }
 
+// ===== VDO คำถาม =====
+// VDO ใหญ่เกินกว่าจะเก็บใน DB — เก็บเป็นไฟล์ใน uploads/videos ชื่อ <uuid><นามสกุล> แล้วเสิร์ฟด้วย express.static
+// (static รองรับ Range request ที่ <video> ใช้ เล่นได้ทันทีโดยไม่ต้องโหลดทั้งไฟล์)
+const VIDEO_TYPES = ['.mp4', '.m4v', '.webm', '.ogv'];
+const VIDEO_MAX_MB = 300;
+const VIDEO_DIR = path.join(__dirname, 'uploads', 'videos');
+fs.mkdirSync(VIDEO_DIR, { recursive: true });
+const videoUpload = multer({
+  storage: multer.diskStorage({
+    destination: VIDEO_DIR,
+    // ชื่อไฟล์สร้างเอง ไม่ใช้ชื่อจากผู้ใช้ (กัน path traversal / ชื่อซ้ำ)
+    filename: (req, file, cb) => cb(null, crypto.randomUUID() + path.extname(file.originalname).toLowerCase()),
+  }),
+  limits: { fileSize: VIDEO_MAX_MB * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (VIDEO_TYPES.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
+    else cb(new Error(`รองรับเฉพาะไฟล์ VDO ${VIDEO_TYPES.join(' ')} เท่านั้น`));
+  }
+});
+
+function uploadVideoField(req, res, next) {
+  videoUpload.single('video')(req, res, (err) => {
+    if (!err) return next();
+    const message = err.code === 'LIMIT_FILE_SIZE' ? `ไฟล์ใหญ่เกิน ${VIDEO_MAX_MB}MB` : err.message;
+    res.status(400).json({ error: message });
+  });
+}
+
+// อ่านได้โดยไม่ต้องใช้รหัส — หน้าเกมบนจอ Station ต้องโหลด VDO เอง
+app.use('/api/videos', express.static(VIDEO_DIR, {
+  index: false,
+  dotfiles: 'deny',
+  setHeaders: (res) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  },
+}));
+
 // ========== STATIC FILE SERVING + SPA FALLBACK ==========
 // ใช้ตอนรันโดยไม่มี Apache (เปิดตรง port 5000) — บน Pi ส่วนนี้ Apache เสิร์ฟจาก backend/build เอง
 const BUILD_PATH = path.join(__dirname, 'build');
@@ -192,6 +230,12 @@ app.post('/api/upload', requireAdmin, uploadImageField, async (req, res) => {
     console.error('POST /api/upload error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// คืน { file } = ชื่อไฟล์ — frontend ต่อเป็น URL /I-DOJO/api/videos/<file> เอง
+app.post('/api/upload-video', requireAdmin, uploadVideoField, (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no file' });
+  res.json({ file: req.file.filename });
 });
 
 // ให้หน้า editor ตรวจรหัสผู้ดูแลก่อนเริ่มแก้

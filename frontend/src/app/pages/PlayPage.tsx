@@ -3,42 +3,30 @@ import { Confetti } from "../components/Confetti";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
 import { cn } from "../components/ui/utils";
-import type { MatchPair, PromptType, Theme } from "../types/theme";
+import type { AnswerOption, MatchPair, Theme } from "../types/theme";
 import { getGame, NoGameError } from "../utils/gameStore";
-import { forwardKeys, isEmbedded, listenPortal, sendResult, type PortalAck, type PortalResult } from "../utils/portalBridge";
+import { isEmbedded, listenPortal, forwardKeys, sendResult, type PortalAck, type PortalResult } from "../utils/portalBridge";
 
-type Phase = "idle" | "running" | "finished" | "timeout";
-type Chip = { id: string; pairId: string; text: string; letter: string; type: PromptType; image?: string };
-type PlacedCard = { label: string; correct: boolean };
-type WrongItem = {
-  pairId: string;
-  topic: string;
-  placedCards: PlacedCard[]; // การ์ดที่วางไว้ แต่ละใบบอกเองว่าถูกหรือผิด
-  correctCards: string[]; // คำตอบที่ถูกจริงทั้งหมด (โชว์ตอนกด เฉลย)
-  missingCount: number; // ใส่ถูกครบทุกใบที่วาง แต่ยังขาดอีกกี่ใบ
-};
-type ModalData = {
-  allCorrect: boolean;
-  isTimeout: boolean;
-  score: number;
-  total: number;
-  timeUsedSeconds: number;
-  wrong: WrongItem[];
-};
+// idle    = รอกดเริ่ม (เฉพาะเปิดเกมตรงๆ · บนจอ Station เริ่มเองทันที)
+// video   = กำลังดู VDO ของข้อปัจจุบัน (ข้ามไม่ได้)
+// answering = เห็นตัวเลือกแล้ว เลือกได้ไม่จำกัดครั้งจนกว่าจะถูก
+type Phase = "idle" | "video" | "answering" | "finished" | "timeout";
+type Choice = AnswerOption & { letter: string };
 type PortalStatus = "idle" | "sending" | "sent" | "error";
 type PortalReport = { result: PortalResult; score: number };
+type Summary = { allCorrect: boolean; timeout: boolean; firstTry: number; total: number; timeUsedSeconds: number };
 
 // portal ไม่ตอบ ack ภายในเวลานี้ = ถือว่ายังไม่ได้บันทึก (PORTAL_INTEGRATION.md ข้อ 2)
 const ACK_TIMEOUT_MS = 10_000;
 // บนจอ Station ต้องมีเวลาจำกัดเสมอ ไม่งั้นตอบไม่ครบจะไม่มีผล fail ส่งไปที่จอ
 const EMBED_DEFAULT_LIMIT = 300;
+// ตอบถูกแล้วค้างให้เห็นสีเขียวสั้นๆ ก่อนขึ้น VDO ข้อถัดไป
+const CORRECT_PAUSE_MS = 1300;
 
 // เวลาที่ใช้จริง: ตอนถูกฝังแต่ตั้งไว้ 0 (ไม่จำกัด) ใช้ 5 นาทีแทน
 function effectiveLimit(game: Theme, embedded: boolean): number {
   return embedded && game.timeLimitSeconds <= 0 ? EMBED_DEFAULT_LIMIT : game.timeLimitSeconds;
 }
-
-const TYPE_BADGE: Record<PromptType, string> = { text: "TEXT", image: "IMAGE", mixed: "MIXED" };
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -49,17 +37,14 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-// ตัวอักษร A, B, C... ติดตามตำแหน่งหลังสลับ เพื่อไม่ให้ลำดับตัวอักษรเฉลยคำตอบ
-// 1 คำถามมีได้หลายคำตอบ — แต่ละคำตอบกลายเป็นการ์ดของตัวเอง ผูกกลับไปที่คำถามด้วย pairId
-function makeChips(pairs: MatchPair[]): Chip[] {
-  const flat = pairs.flatMap((p) =>
-    p.answers.map((a) => ({ id: a.id, pairId: p.id, text: a.text, type: a.type, image: a.image })),
-  );
-  return shuffle(flat).map((c, i) => ({ ...c, letter: String.fromCharCode(65 + i) }));
-}
-
-function chipLabel(chip: Chip | undefined): string | null {
-  return chip ? `${chip.letter}. ${chip.text || "(ภาพ)"}` : null;
+// สลับลำดับตัวเลือกของทุกข้อไว้ล่วงหน้า (ตอนโหลด/เล่นใหม่) — ตัวอักษร A, B, C ติดตามตำแหน่งหลังสลับ
+// ไม่สลับใหม่ทุกครั้งที่ render ไม่งั้นตัวเลือกจะวิ่งหนีตอนผู้เล่นกำลังจะกด
+function makeChoices(pairs: MatchPair[]): Record<string, Choice[]> {
+  const out: Record<string, Choice[]> = {};
+  for (const p of pairs) {
+    out[p.id] = shuffle(p.answers).map((a, i) => ({ ...a, letter: String.fromCharCode(65 + i) }));
+  }
+  return out;
 }
 
 function formatTime(totalSeconds: number): string {
@@ -68,16 +53,16 @@ function formatTime(totalSeconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function resultTier(score: number, total: number): { title: string; sub?: string } {
-  if (score === total) return { title: "PERFECT LAP! 🏆", sub: "รถแข่งพุ่งผ่านธงตาหมากรุก! 🏁" };
-  if (score * 8 >= total * 3) return { title: "PODIUM FINISH!" };
+function resultTier(firstTry: number, total: number): { title: string; sub?: string } {
+  if (firstTry === total) return { title: "PERFECT LAP! 🏆", sub: "ตอบถูกทุกข้อตั้งแต่ครั้งแรก รถแข่งพุ่งผ่านธงตาหมากรุก! 🏁" };
+  if (firstTry * 8 >= total * 3) return { title: "PODIUM FINISH!" };
   return { title: "KEEP PUSHING!" };
 }
 
 function GameTitle({ name }: { name: string }) {
   const m = name.match(/^(.*\S)\s+RED$/);
   return (
-    <h1 className="f1-font-display text-2xl font-bold text-f1-ink">
+    <h1 className="f1-font-display text-2xl font-bold text-f1-ink fit:text-xl">
       🏁 {m ? m[1] : name}
       {m && <span className="text-[#DC0000]"> RED</span>}
     </h1>
@@ -86,22 +71,24 @@ function GameTitle({ name }: { name: string }) {
 
 export function PlayPage() {
   const [game, setGame] = useState<Theme | null>(null);
+  const [choices, setChoices] = useState<Record<string, Choice[]>>({});
   const [phase, setPhase] = useState<Phase>("idle");
-  const [chips, setChips] = useState<Chip[]>([]);
-  // box id = pair.id เสมอ · value = รายการ chip id ที่วางอยู่ในช่องนี้ (ความจุ = pair.answers.length)
-  const [slots, setSlots] = useState<Record<string, string[]>>({});
-  const [lockedCorrect, setLockedCorrect] = useState<Set<string>>(new Set());
-  // ช่องที่มีการ์ดผิดจริงๆ ปนอยู่ (ไม่ใช่แค่ใส่ยังไม่ครบ) — ใช้ไฮไลต์แดง/เขย่าที่ตัวช่อง
-  const [wrongBoxIds, setWrongBoxIds] = useState<Set<string>>(new Set());
-  // การ์ดใบไหนบ้างที่ไม่ใช่คำตอบของข้อนั้น — ใช้ขึ้นกากบาทแดงเฉพาะใบที่ผิดจริง
-  const [wrongChipIds, setWrongChipIds] = useState<Set<string>>(new Set());
+  const [qIndex, setQIndex] = useState(0);
+  // ตัวเลือกที่กดผิดไปแล้วในข้อปัจจุบัน — กดซ้ำไม่ได้ แต่ตัวอื่นยังเลือกได้
+  const [wrongIds, setWrongIds] = useState<Set<string>>(new Set());
+  // ตัวเลือกที่ถูกที่เพิ่งกด (ช่วงค้างสีเขียวก่อนไปข้อต่อไป) · ระหว่างนี้ล็อกการกดและหยุดเวลา
+  const [correctId, setCorrectId] = useState<string | null>(null);
+  // pairId → true = ถูกตั้งแต่ครั้งแรก · false = ถูกหลังตอบผิดมาก่อน · ไม่มี key = ยังไม่ได้ตอบถูก
+  const [solved, setSolved] = useState<Record<string, boolean>>({});
+  // เวลานับเฉพาะตอนตอบคำถาม ไม่นับตอนดู VDO
   const [elapsed, setElapsed] = useState(0);
-  const [modalData, setModalData] = useState<ModalData | null>(null);
-  const [showHelp, setShowHelp] = useState(false);
-  // กดช่องว่างที่ยังไม่ได้เลือกการ์ดไว้ล่วงหน้า → เปิด popup นี้ให้เลือกคำตอบจากคลังแล้ววางทันที
-  const [pickerBoxId, setPickerBoxId] = useState<string | null>(null);
-  // ตรวจคำตอบ = บอกแค่ถูก/ผิด · ต้องกดปุ่มเฉลยแยกต่างหากถึงจะเห็นคำตอบที่ถูกจริง
-  const [showAnswerKey, setShowAnswerKey] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [showSummary, setShowSummary] = useState(true);
+
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [needsTap, setNeedsTap] = useState(false);
+  const [videoError, setVideoError] = useState(false);
+  const [videoAttempt, setVideoAttempt] = useState(0);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -109,6 +96,9 @@ export function PlayPage() {
   const [portalMsg, setPortalMsg] = useState<string | null>(null);
 
   const embedded = isEmbedded();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const maxWatchedRef = useRef(0); // ตำแหน่งไกลสุดที่ดูถึง — กันกรอข้ามไปข้างหน้า
+  const nextTimerRef = useRef<number | null>(null);
   // ผลที่ส่งแล้วกำลังรอ ack (กันส่งซ้ำ) และผลล่าสุดไว้กด "ส่งใหม่"
   const pendingRef = useRef<PortalReport | null>(null);
   const lastReportRef = useRef<PortalReport | null>(null);
@@ -121,9 +111,9 @@ export function PlayPage() {
     getGame()
       .then((g) => {
         setGame(g);
-        setChips(makeChips(g.pairs));
-        // บนจอ Station เริ่มนับเวลาทันที ไม่รอผู้เล่นแตะ
-        if (embedded) setPhase("running");
+        setChoices(makeChoices(g.pairs));
+        // บนจอ Station เริ่มทันที ไม่รอผู้เล่นแตะ
+        if (embedded) beginQuestion(g.pairs[0]);
       })
       .catch((e) => {
         setLoadError(
@@ -132,6 +122,7 @@ export function PlayPage() {
             : `โหลดชุดคำถามไม่ได้${e instanceof Error ? ` (${e.message})` : ""}`,
         );
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAttempt]);
 
   useEffect(() => {
@@ -150,23 +141,37 @@ export function PlayPage() {
       stopListen();
       stopKeys();
       if (ackTimerRef.current) window.clearTimeout(ackTimerRef.current);
+      if (nextTimerRef.current) window.clearTimeout(nextTimerRef.current);
     };
   }, []);
 
+  // เวลานับเฉพาะตอนเห็นตัวเลือกและยังไม่ได้ตอบถูก
+  const timerRunning = phase === "answering" && correctId === null;
   useEffect(() => {
-    if (phase !== "running") return;
+    if (!timerRunning) return;
     const timer = setInterval(() => setElapsed((prev) => prev + 1), 1000);
     return () => clearInterval(timer);
-  }, [phase]);
+  }, [timerRunning]);
 
   useEffect(() => {
-    if (phase !== "running" || !game) return;
+    if (!timerRunning || !game) return;
     const limit = effectiveLimit(game, embedded);
-    if (limit > 0 && elapsed >= limit) {
-      handleCheck(true);
-    }
+    if (limit > 0 && elapsed >= limit) finishGame(false, solved, elapsed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [elapsed, phase, game]);
+  }, [elapsed, timerRunning, game]);
+
+  // เริ่มข้อใหม่: ถ้ามี VDO ก็ขึ้น VDO ก่อน ไม่มีก็ข้ามไปตัวเลือกเลย
+  useEffect(() => {
+    if (phase !== "video") return;
+    const v = videoRef.current;
+    if (!v) return;
+    maxWatchedRef.current = 0;
+    setVideoProgress(0);
+    setNeedsTap(false);
+    setVideoError(false);
+    // เบราว์เซอร์/iframe อาจบล็อก autoplay ที่มีเสียง → โชว์ปุ่มให้แตะเริ่ม
+    v.play().catch(() => setNeedsTap(true));
+  }, [phase, qIndex, videoAttempt]);
 
   if (!game) {
     return (
@@ -185,23 +190,22 @@ export function PlayPage() {
   }
 
   const total = game.pairs.length;
-  const filledCount = game.pairs.filter((p) => (slots[p.id]?.length ?? 0) === p.answers.length).length;
-  const isAllFilled = filledCount === total;
-  // ใส่คำตอบไปแล้วอย่างน้อย 1 ใบ ก็กดตรวจได้ทันที ไม่ต้องรอครบทุกช่อง
-  const totalSlots = game.pairs.reduce((sum, p) => sum + p.answers.length, 0);
-  const totalPlaced = Object.values(slots).reduce((sum, arr) => sum + arr.length, 0);
-  const hasAnyPlaced = totalPlaced > 0;
-  const pool = chips.filter((c) => !Object.values(slots).some((arr) => arr.includes(c.id)));
+  const pair = game.pairs[Math.min(qIndex, total - 1)];
+  const options = choices[pair.id] ?? [];
+  const solvedCount = Object.keys(solved).length;
   const limit = effectiveLimit(game, embedded);
   const hasLimit = limit > 0;
   const remaining = hasLimit ? Math.max(0, limit - elapsed) : null;
   const lowTime = remaining !== null && remaining <= 60;
-  const locked = phase === "finished" || phase === "timeout";
+  const over = phase === "finished" || phase === "timeout";
   // ตอนถูกฝัง: ส่งผลไปแล้ว (กำลังรอ/ได้ ack) → ไม่ให้เล่นต่อเอง รอจอจัดการ
   const resultHandedOff = embedded && (portalStatus === "sending" || portalStatus === "sent");
+  const tier = summary ? resultTier(summary.firstTry, summary.total) : null;
 
-  function startIfIdle() {
-    setPhase((p) => (p === "idle" ? "running" : p));
+  function beginQuestion(p: MatchPair) {
+    setWrongIds(new Set());
+    setCorrectId(null);
+    setPhase(p.video ? "video" : "answering");
   }
 
   // ส่งผลขึ้นจอ Station เฉพาะตอนถูกฝัง · ระหว่างรอ ack ห้ามส่งซ้ำ
@@ -223,231 +227,113 @@ export function PlayPage() {
     if (lastReportRef.current) report(lastReportRef.current);
   }
 
+  function finishGame(allCorrect: boolean, solvedMap: Record<string, boolean>, timeUsed: number) {
+    if (!game) return;
+    const firstTry = Object.values(solvedMap).filter(Boolean).length;
+    const pct = Math.round((100 * firstTry) / game.pairs.length);
+    setSummary({ allCorrect, timeout: !allCorrect, firstTry, total: game.pairs.length, timeUsedSeconds: timeUsed });
+    setShowSummary(true);
+    setPhase(allCorrect ? "finished" : "timeout");
+    // ตอบถูกครบ = pass · หมดเวลา = fail (score = % ที่ตอบถูกตั้งแต่ครั้งแรก เก็บไว้ดูเท่านั้น)
+    report({ result: allCorrect ? "pass" : "fail", score: pct });
+  }
+
+  function startGame() {
+    // ต้องกดปุ่มเองก่อน เบราว์เซอร์จึงยอมให้ VDO เล่นเองพร้อมเสียงในข้อถัดๆ ไป
+    beginQuestion(game!.pairs[0]);
+  }
+
   function resetAll() {
     if (!game) return;
+    if (nextTimerRef.current) window.clearTimeout(nextTimerRef.current);
     // ผลที่ยังรอ ack อยู่ปล่อยให้รอต่อ ส่วนสถานะอื่นเริ่มใหม่
     if (!pendingRef.current) {
       setPortalStatus("idle");
       setPortalMsg(null);
     }
-    setChips(makeChips(game.pairs));
-    setSlots({});
-    setPickerBoxId(null);
-    setLockedCorrect(new Set());
-    setWrongBoxIds(new Set());
-    setWrongChipIds(new Set());
+    setChoices(makeChoices(game.pairs));
+    setSolved({});
+    setQIndex(0);
+    setWrongIds(new Set());
+    setCorrectId(null);
     setElapsed(0);
-    setModalData(null);
-    setShowAnswerKey(false);
+    setSummary(null);
     setPhase("idle");
   }
 
-  function clearAnswers() {
-    setSlots({});
-    setLockedCorrect(new Set());
-    setWrongBoxIds(new Set());
-    setWrongChipIds(new Set());
+  function handleVideoEnded() {
+    setPhase("answering");
   }
 
-  // fromBoxId = ลบการ์ดออกจากช่อง (removeChipFromSlot) · targetBoxId = วางการ์ดลงช่อง (pickForBox) — ไม่เกิดพร้อมกัน
-  function placeChip(chipId: string, fromBoxId: string | null, targetBoxId: string | null) {
-    setSlots((prev) => {
-      const next: Record<string, string[]> = {};
-      for (const [k, v] of Object.entries(prev)) next[k] = v.filter((id) => id !== chipId);
-      if (targetBoxId) {
-        const capacity = game?.pairs.find((p) => p.id === targetBoxId)?.answers.length ?? 1;
-        const occupants = next[targetBoxId] ?? [];
-        if (occupants.length < capacity) next[targetBoxId] = [...occupants, chipId];
-      }
-      return next;
-    });
-    setWrongBoxIds((prev) => {
-      const next = new Set(prev);
-      if (fromBoxId) next.delete(fromBoxId);
-      if (targetBoxId) next.delete(targetBoxId);
-      return next;
-    });
-    setWrongChipIds((prev) => {
-      if (!prev.has(chipId)) return prev;
-      const next = new Set(prev);
-      next.delete(chipId);
-      return next;
-    });
+  function handleVideoTimeUpdate() {
+    const v = videoRef.current;
+    if (!v) return;
+    maxWatchedRef.current = Math.max(maxWatchedRef.current, v.currentTime);
+    if (v.duration > 0) setVideoProgress(v.currentTime / v.duration);
   }
 
-  function handleCheck(isAuto: boolean) {
-    if (!game) return;
-    if (!isAuto && !hasAnyPlaced) return;
-    const newLocked = new Set(lockedCorrect);
-    const newWrongIds = new Set<string>();
-    const newWrongChipIds = new Set<string>();
-    const wrong: WrongItem[] = [];
-    for (const pair of game.pairs) {
-      const placed = slots[pair.id] ?? [];
-      const correctIds = new Set(pair.answers.map((a) => a.id));
-      const isCorrect = placed.length === pair.answers.length && placed.every((id) => correctIds.has(id));
-      if (isCorrect) {
-        newLocked.add(pair.id);
-        continue;
-      }
-      // แยกการ์ดที่ผิดจริง (ไม่ใช่คำตอบของข้อนี้) ออกจากการ์ดที่ถูกแต่ใส่ยังไม่ครบ — ยังไม่ครบไม่เขย่า/ไม่ขึ้นกากบาท ถ้าทุกใบที่ใส่ยังถูกอยู่
-      const wrongCardIds = placed.filter((id) => !correctIds.has(id));
-      const hasWrongCard = wrongCardIds.length > 0;
-      if (hasWrongCard) newWrongIds.add(pair.id);
-      wrongCardIds.forEach((id) => newWrongChipIds.add(id));
-      wrong.push({
-        pairId: pair.id,
-        topic: pair.promptText || "(ภาพ)",
-        placedCards: placed.map((id) => ({
-          label: chipLabel(chips.find((c) => c.id === id)) ?? "?",
-          correct: correctIds.has(id),
-        })),
-        correctCards: pair.answers.map(
-          (a) => chipLabel(chips.find((c) => c.id === a.id)) ?? (a.text || "(ภาพ)"),
-        ),
-        missingCount: pair.answers.length - placed.length,
-      });
+  // กรอไปข้างหน้าไม่ได้ (ไม่มีแถบควบคุมให้กรออยู่แล้ว กันกรณีกดคีย์ลัดของเบราว์เซอร์)
+  function handleVideoSeeking() {
+    const v = videoRef.current;
+    if (v && v.currentTime > maxWatchedRef.current + 0.5) v.currentTime = maxWatchedRef.current;
+  }
+
+  function handlePick(option: Choice) {
+    if (phase !== "answering" || correctId !== null || wrongIds.has(option.id) || !game) return;
+    if (!option.correct) {
+      setWrongIds((prev) => new Set(prev).add(option.id));
+      return;
     }
-    setLockedCorrect(newLocked);
-    setWrongBoxIds(newWrongIds);
-    setWrongChipIds(newWrongChipIds);
-    setShowAnswerKey(false);
-    const allCorrect = wrong.length === 0;
-    setModalData({
-      allCorrect,
-      isTimeout: isAuto && !allCorrect,
-      score: newLocked.size,
-      total: game.pairs.length,
-      timeUsedSeconds: elapsed,
-      wrong,
-    });
-    // ผิดแต่เวลายังเหลือ = ไม่ส่งผล ให้แก้ต่อจนถูกครบหรือหมดเวลา
-    const pct = Math.round((100 * newLocked.size) / game.pairs.length);
-    if (allCorrect) {
-      setPhase("finished");
-      report({ result: "pass", score: pct });
-    } else if (isAuto) {
-      setPhase("timeout");
-      report({ result: "fail", score: pct });
-    }
+    // ถูกตั้งแต่ครั้งแรกก็ต่อเมื่อยังไม่เคยกดผิดในข้อนี้
+    const nextSolved = { ...solved, [pair.id]: wrongIds.size === 0 };
+    setSolved(nextSolved);
+    setCorrectId(option.id);
+    const isLast = qIndex >= game.pairs.length - 1;
+    const timeUsed = elapsed;
+    nextTimerRef.current = window.setTimeout(() => {
+      if (isLast) {
+        finishGame(true, nextSolved, timeUsed);
+        return;
+      }
+      const nextIndex = qIndex + 1;
+      setQIndex(nextIndex);
+      beginQuestion(game.pairs[nextIndex]);
+    }, CORRECT_PAUSE_MS);
   }
 
-  function retryWrongOnly() {
-    setSlots((prev) => {
-      const next = { ...prev };
-      wrongBoxIds.forEach((boxId) => {
-        next[boxId] = [];
-      });
-      return next;
-    });
-    setWrongBoxIds(new Set());
-    setModalData(null);
-    setShowAnswerKey(false);
-  }
-
-  // กดช่องว่าง → เปิด popup ให้เลือกคำตอบจากคลังแล้ววางลงช่องนี้ทันที
-  function handleSlotClick(boxId: string) {
-    if (locked || lockedCorrect.has(boxId)) return;
-    startIfIdle();
-    setPickerBoxId(boxId);
-  }
-
-  function pickForBox(chipId: string) {
-    if (!pickerBoxId) return;
-    placeChip(chipId, null, pickerBoxId);
-    setPickerBoxId(null);
-  }
-
-  function removeChipFromSlot(boxId: string, chipId: string) {
-    if (locked || lockedCorrect.has(boxId)) return;
-    placeChip(chipId, boxId, null);
-  }
-
-  // แสดงการ์ดที่วางอยู่ในช่องคำตอบแล้ว (อ่านอย่างเดียว — เอาออกผ่านปุ่ม ✕ ของช่องเท่านั้น)
-  function renderChip(chip: Chip) {
-    const hasImg = chip.type !== "text" && Boolean(chip.image);
-    const captionClass = chip.type === "image" ? "text-xs xl:text-sm" : "";
+  function renderPrompt(p: MatchPair) {
+    const hasImg = p.promptType !== "text" && Boolean(p.promptImage);
     return (
-      <div className="f1-font-display flex h-full w-full min-h-0 flex-col items-center justify-center gap-1 rounded-md border-2 border-transparent bg-transparent p-2 fit:p-1 text-center text-sm font-medium text-f1-ink sm:text-base xl:text-xl fit:text-xs fit:xl:text-sm fit:2xl:text-lg">
+      <div className="flex min-w-0 flex-col items-center gap-3 rounded-sm border-2 border-f1-line border-l-[6px] border-l-[#DC0000] bg-white p-4 shadow-sm fit:gap-2 fit:p-3">
         {hasImg && (
-          <img src={chip.image} alt="" draggable={false} className="min-h-0 w-full flex-1 object-contain" />
-        )}
-        <span className={cn("leading-snug", captionClass)}>
-          <span className="mr-1 text-f1-red">{chip.letter}.</span>
-          {chip.text}
-        </span>
-      </div>
-    );
-  }
-
-  function renderQuestion(pair: MatchPair, idx: number) {
-    const hasImg = pair.promptType !== "text" && Boolean(pair.promptImage);
-    if (hasImg) {
-      return (
-        <div
-          className="relative inline-flex min-w-0 shrink-0 justify-self-start items-center justify-center overflow-hidden rounded-sm border-2 border-f1-line border-l-[6px] border-l-[#DC0000] bg-zinc-200 shadow-sm"
-          // ความสูงปรับตามพื้นที่หน้าจอที่เหลือจริง (หัก chrome ~470px) หารด้วยจำนวนคำถาม · ความกว้างหดตามสัดส่วนจริงของรูป ไม่ยืดเต็มคอลัมน์ (กันช่องว่างข้างรูป)
-          style={{ height: `clamp(9rem, calc((100vh - 470px) / ${total}), 16rem)` }}
-        >
           <img
-            src={pair.promptImage}
-            alt={pair.promptText}
+            src={p.promptImage}
+            alt={p.promptText}
             draggable={false}
-            className="h-full w-auto object-contain"
+            className="max-h-48 w-auto max-w-full object-contain fit:max-h-[22vh]"
           />
-          <span className="f1-font-mono absolute left-2 top-1 rounded-sm bg-white/90 px-1.5 py-0.5 text-xs font-bold text-f1-red lg:text-sm">
-            {idx + 1}
-          </span>
-          <span className="f1-font-mono absolute right-2 top-1 rounded-sm border border-f1-line bg-white/90 px-1.5 py-0.5 text-[10px] text-f1-ink-2">
-            {TYPE_BADGE[pair.promptType]}
-          </span>
-          {pair.promptText && (
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/45 to-transparent px-3 pb-1 pt-4">
-              <span className="f1-font-display break-words text-sm font-bold leading-tight text-white lg:text-base">
-                {pair.promptText}
-              </span>
-            </div>
-          )}
-        </div>
-      );
-    }
-    return (
-      <div className="relative flex min-w-0 items-center gap-3 rounded-sm border-2 border-f1-line border-l-[6px] border-l-[#DC0000] bg-white p-3 shadow-sm lg:gap-4 lg:p-5 fit:p-2 fit:2xl:p-4">
-        <span className="f1-font-mono text-xs text-f1-red lg:text-base fit:shrink-0">{idx + 1}</span>
-        <span className="f1-font-mono absolute right-2 top-2 rounded-sm border border-f1-line px-1.5 py-0.5 text-[10px] text-f1-red">
-          {TYPE_BADGE[pair.promptType]}
-        </span>
-        <span className="f1-font-display min-w-0 flex-1 break-words font-bold text-f1-ink lg:text-2xl fit:text-lg fit:2xl:text-2xl">
-          {pair.promptText}
-        </span>
+        )}
+        {p.promptText && (
+          <p className="f1-font-display break-words text-center text-xl font-bold text-f1-ink lg:text-3xl fit:text-xl fit:2xl:text-3xl">
+            {p.promptText}
+          </p>
+        )}
       </div>
     );
   }
 
-  const sectionTitle = "f1-font-display text-lg font-bold tracking-wide text-f1-ink fit:text-sm";
-  // คอลัมน์คำถามเป็น auto (หดตามรูปจริง) ไม่ใช่ 1fr เพื่อให้ลูกศร/คำตอบขยับมาชิดคำถามแทนที่จะลอยกลางแถว
-  const rowGrid = "grid grid-cols-[auto_auto_minmax(0,1fr)] items-stretch gap-3 lg:gap-6";
-  const tier = modalData ? resultTier(modalData.score, modalData.total) : null;
-  const howToList = (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-      {(
-        [
-          ["L", "ซ้าย = คำถาม (คงที่ อ่านอย่างเดียว)"],
-          ["R", "ขวา = ช่องคำตอบ (วางคำตอบที่นี่)"],
-          ["1", "คลิกช่องว่างทางขวาที่ต้องการวาง"],
-          ["2", "เลือกคำตอบจาก popup ที่เปิดขึ้นมา — คำตอบจะถูกวางลงช่องนั้นทันที"],
-          ["3", "กด ✕ ที่มุมการ์ดเพื่อเอาคำตอบออก แล้วเลือกใหม่ได้"],
-          ["4", "ใส่คำตอบอย่างน้อย 1 ช่อง แล้วกด ตรวจสอบคำตอบ (CHECK) ได้เลย — ตรวจซ้ำได้เรื่อยๆ"],
-        ] as const
-      ).map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="f1-font-mono flex h-6 w-6 items-center justify-center rounded-sm bg-[#DC0000] text-xs font-bold">
-            {k}
-          </dt>
-          <dd className="self-center">{v}</dd>
-        </div>
+  const progressDots = (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label={`ข้อที่ ${qIndex + 1} จาก ${total}`}>
+      {game.pairs.map((p, i) => (
+        <span
+          key={p.id}
+          className={cn(
+            "h-2.5 w-6 rounded-full",
+            p.id in solved ? "bg-[#15803D]" : i === qIndex && !over ? "bg-[#DC0000]" : "bg-zinc-300",
+          )}
+        />
       ))}
-    </dl>
+    </div>
   );
 
   return (
@@ -459,13 +345,12 @@ export function PlayPage() {
       )}
     >
       <F1Header />
-      <main className="flex w-full flex-col gap-4 px-6 py-6 lg:px-12 fit:gap-2 fit:px-8 fit:py-2">
-        {/* ปักหมุดไว้บนสุดด้วย sticky ให้กดตรวจคำตอบได้ตลอดเวลาแม้เลื่อนดูคำถามอยู่ */}
-        <div className="sticky top-0 z-20 -mx-6 flex flex-col gap-4 bg-f1-paper px-6 pb-2 lg:-mx-12 lg:px-12 fit:-mx-8 fit:flex-row fit:items-center fit:gap-4 fit:px-8">
+      <main className="flex w-full flex-1 flex-col gap-4 px-6 py-6 lg:px-12 fit:gap-2 fit:px-8 fit:py-2">
+        <div className="flex flex-col gap-3 fit:flex-row fit:items-center fit:gap-4">
           <div className="fit:shrink-0">
             <GameTitle name={game.name} />
             <p className="f1-font-display mt-1 text-sm font-medium tracking-widest text-f1-red fit:mt-0 fit:text-xs">
-              LEFT Q • RIGHT A — QUESTION LEFT • ANSWER RIGHT • MATCH
+              WATCH • ANSWER • NEXT LAP
             </p>
           </div>
 
@@ -476,18 +361,20 @@ export function PlayPage() {
                 <span
                   className={cn(
                     "text-2xl font-bold text-white",
-                    lowTime && phase === "running" && "f1-timer-blink text-f1-red-bright",
+                    lowTime && timerRunning && "f1-timer-blink text-f1-red-bright",
                   )}
                 >
                   {remaining !== null ? formatTime(remaining) : formatTime(elapsed)}
                 </span>
               </div>
               <p className="f1-font-display text-sm text-zinc-300">
-                · สถานะ:{" "}
+                · ข้อ{" "}
                 <strong className="text-white">
-                  {filledCount}/{total} ช่อง • {pool.length} ตัวเลือกเหลือ
-                </strong>
+                  {over ? total : Math.min(qIndex + 1, total)}/{total}
+                </strong>{" "}
+                · ตอบถูกแล้ว <strong className="text-white">{solvedCount}</strong>
               </p>
+              <div className="ml-auto">{progressDots}</div>
             </div>
 
             {remaining !== null && (
@@ -495,306 +382,161 @@ export function PlayPage() {
                 <div
                   className={cn(
                     "h-full rounded-full bg-[#DC0000] transition-all",
-                    lowTime && phase === "running" && "f1-timer-blink",
+                    lowTime && timerRunning && "f1-timer-blink",
                   )}
                   style={{ width: `${(remaining / limit) * 100}%` }}
                 />
               </div>
             )}
           </div>
+        </div>
 
-          <div className="flex shrink-0 flex-col items-end gap-1 fit:items-end">
-            {!locked && (
-              <p className="f1-font-display text-right text-xs text-f1-red">
-                {isAllFilled
-                  ? "ครบแล้ว! กดตรวจสอบได้เลย"
-                  : hasAnyPlaced
-                    ? `กดตรวจสอบได้เลย (วางแล้ว ${totalPlaced}/${totalSlots} ใบ)`
-                    : "⚠️ ยังไม่ได้ใส่คำตอบ"}
-              </p>
-            )}
-            <div className="flex shrink-0 gap-2">
-              {!locked && (
-                <Button
-                  disabled={!hasAnyPlaced}
-                  onClick={() => handleCheck(false)}
-                  className={cn(
-                    "f1-font-display",
-                    hasAnyPlaced ? "f1-glow bg-red-600 text-white hover:bg-red-700" : "bg-zinc-200 text-zinc-500",
-                  )}
+        {/* ===== หน้าเริ่มเกม (เฉพาะเปิดเกมตรงๆ) ===== */}
+        {phase === "idle" && (
+          <div className="f1-font-display mx-auto flex w-full max-w-2xl flex-col items-center gap-4 rounded-sm border-2 border-f1-line bg-white p-8 text-center text-f1-ink">
+            <p className="text-lg font-bold text-f1-red">🚦 READY TO RACE</p>
+            <ol className="space-y-1 text-left text-sm">
+              <li>1. ดู VDO ให้จบ (ข้ามหรือกรอไม่ได้)</li>
+              <li>2. เมื่อ VDO จบ ตัวเลือกคำตอบจะขึ้นมา — เลือกคำตอบที่ถูก</li>
+              <li>3. ถ้าตอบผิด เลือกใหม่ได้เรื่อยๆ จนกว่าจะถูก</li>
+              <li>4. ตอบถูกแล้วจะไป VDO ข้อถัดไปเอง จนครบทั้ง {total} ข้อ</li>
+              {hasLimit && <li>⏱ เวลารวม {formatTime(limit)} นาที (ไม่นับเวลาที่ดู VDO)</li>}
+            </ol>
+            <Button className="f1-glow f1-font-display bg-red-600 px-8 text-white hover:bg-red-700" onClick={startGame}>
+              🏁 เริ่มเกม
+            </Button>
+          </div>
+        )}
+
+        {/* ===== ดู VDO ===== */}
+        {phase === "video" && pair.video && (
+          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-2">
+            <div className="f1-font-display flex items-center justify-between text-sm font-bold text-f1-red">
+              <span>🎬 ข้อที่ {qIndex + 1} — ดู VDO ให้จบก่อนตอบ</span>
+              <span className="f1-font-mono text-xs text-f1-mute">{Math.round(videoProgress * 100)}%</span>
+            </div>
+            <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-sm border-4 border-f1-ink bg-black">
+              <video
+                key={`${pair.id}-${videoAttempt}`}
+                ref={videoRef}
+                src={pair.video}
+                playsInline
+                controls={false}
+                disablePictureInPicture
+                controlsList="nodownload noplaybackrate noremoteplayback"
+                onContextMenu={(e) => e.preventDefault()}
+                onEnded={handleVideoEnded}
+                onTimeUpdate={handleVideoTimeUpdate}
+                onSeeking={handleVideoSeeking}
+                onPlay={() => setNeedsTap(false)}
+                onError={() => setVideoError(true)}
+                className="max-h-[70vh] w-full object-contain fit:max-h-full"
+              />
+              {needsTap && !videoError && (
+                <button
+                  type="button"
+                  onClick={() => videoRef.current?.play().then(() => setNeedsTap(false)).catch(() => setNeedsTap(true))}
+                  className="f1-font-display absolute inset-0 flex items-center justify-center bg-black/60 text-2xl font-bold text-white"
                 >
-                  🏁 ตรวจสอบคำตอบ (CHECK)
-                </Button>
+                  ▶ แตะเพื่อเริ่มดู VDO
+                </button>
               )}
-              <Button
-                variant="outline"
-                onClick={() => setShowHelp(true)}
-                className="f1-font-display hidden shrink-0 border-f1-ink bg-white text-f1-ink hover:bg-zinc-100 fit:inline-flex"
-              >
-                📋 วิธีเล่น
-              </Button>
+              {videoError && (
+                <div className="f1-font-display absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 p-4 text-center text-white">
+                  <p className="text-lg font-bold">โหลด VDO ไม่ได้</p>
+                  <div className="flex gap-2">
+                    <Button className="bg-[#DC0000] text-white hover:bg-[#b00000]" onClick={() => setVideoAttempt((n) => n + 1)}>
+                      ลองใหม่
+                    </Button>
+                    {/* VDO เสียทำให้เกมค้างทั้งสถานี จึงยอมให้ไปตอบเลยได้เฉพาะกรณีโหลดไม่ได้จริงๆ */}
+                    <Button variant="outline" className="border-white bg-transparent text-white hover:bg-white/10" onClick={handleVideoEnded}>
+                      ข้ามไปตอบเลย
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-300">
+              <div className="h-full rounded-full bg-[#DC0000]" style={{ width: `${videoProgress * 100}%` }} />
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="f1-font-display rounded-sm border border-f1-line bg-white p-4 text-sm text-f1-ink fit:hidden">
-          <h2 className="mb-2 font-bold text-f1-red">📋 วิธีเล่น (แบบคลิก)</h2>
-          {howToList}
-        </div>
+        {/* ===== ตอบคำถาม ===== */}
+        {(phase === "answering" || over) && (
+          <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 fit:gap-2">
+            <h2 className="f1-font-display text-lg font-bold tracking-wide text-f1-ink fit:text-sm">
+              📝 ข้อที่ {Math.min(qIndex + 1, total)} • เลือกคำตอบที่ถูก
+            </h2>
+            {renderPrompt(pair)}
 
-        <h2 className={sectionTitle}>📝 คำถาม • QUESTION ⟷ ✅ คำตอบ • ANSWER</h2>
-
-        <div className="grid gap-y-2">
-          <div className="f1-font-display grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-3 px-1 text-xs font-medium tracking-wide text-f1-red lg:gap-6">
-            <span># · 📝 คำถาม (ซ้าย)</span>
-            <span>⟷</span>
-            <span className="text-center">✅ คำตอบ (ขวา)</span>
-          </div>
-          {game.pairs.map((pair, idx) => {
-            const occupantIds = slots[pair.id] ?? [];
-            const occupantChips = occupantIds
-              .map((id) => chips.find((c) => c.id === id))
-              .filter((c): c is Chip => Boolean(c));
-            const capacity = pair.answers.length;
-            const isMulti = capacity > 1;
-            const isLocked = lockedCorrect.has(pair.id);
-            const isWrong = wrongBoxIds.has(pair.id);
-            return (
-              <div key={pair.id} className={rowGrid}>
-                {renderQuestion(pair, idx)}
-                <span className="f1-font-mono self-center text-f1-red">⟷</span>
-                {!isMulti ? (
-                  <div className="relative h-full">
-                    <div
-                      data-dropbox-id={pair.id}
-                      onClick={() => {
-                        if (!occupantChips[0]) handleSlotClick(pair.id);
-                      }}
-                      className={cn(
-                        "flex h-full w-full items-center justify-center rounded-xl border-4 border-dashed border-[#8B8B95] bg-white/70 text-sm transition-colors",
-                        !occupantChips[0] && "cursor-pointer",
-                        occupantChips.length > 0 && "border-solid border-f1-ink bg-white",
-                        isLocked && "f1-correct-bounce border-solid border-[#15803D] bg-f1-ok-bg",
-                        !isLocked && isWrong && "f1-shake border-solid border-[#DC0000] bg-[#DC0000]/10",
-                      )}
-                    >
-                      {occupantChips[0] ? (
-                        renderChip(occupantChips[0])
-                      ) : (
-                        <span className="f1-font-mono px-2 text-center text-xs text-[#8B8B95]">
-                          คลิกช่องเพื่อเลือกคำตอบ
-                        </span>
-                      )}
-                    </div>
-                    {occupantChips[0] && !isLocked && !locked && (
-                      <button
-                        type="button"
-                        onClick={() => removeChipFromSlot(pair.id, occupantChips[0].id)}
-                        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#DC0000] text-xs font-bold text-white"
-                        aria-label="ลบการ์ดออกจากช่อง"
-                      >
-                        ✕
-                      </button>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 fit:gap-2">
+              {options.map((opt) => {
+                const isCorrect = correctId === opt.id;
+                const isWrong = wrongIds.has(opt.id);
+                const hasImg = opt.type !== "text" && Boolean(opt.image);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={over || correctId !== null || isWrong}
+                    onClick={() => handlePick(opt)}
+                    className={cn(
+                      "f1-font-display relative flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-4 p-3 text-center text-lg font-medium text-f1-ink transition-colors fit:min-h-16 fit:text-base fit:2xl:text-xl",
+                      "border-[#8B8B95] bg-white hover:border-[#DC0000] hover:bg-[#DC0000]/5",
+                      isCorrect && "f1-correct-bounce border-[#15803D] bg-f1-ok-bg hover:border-[#15803D] hover:bg-f1-ok-bg",
+                      isWrong && "f1-shake border-[#DC0000] bg-[#DC0000]/10 opacity-70 hover:border-[#DC0000]",
                     )}
-                    {isLocked && (
-                      <div className="f1-checkered-flash pointer-events-none absolute inset-0 rounded-xl" />
+                  >
+                    {hasImg && (
+                      <img src={opt.image} alt="" draggable={false} className="max-h-32 w-full object-contain fit:max-h-[14vh]" />
                     )}
-                    {!isLocked && isWrong && (
-                      <div className="f1-redflag-flash pointer-events-none absolute inset-0 rounded-xl" />
-                    )}
-                    {occupantChips[0] && isLocked && (
-                      <span className="absolute -bottom-2 -right-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#15803D] text-sm font-bold text-white shadow">
+                    <span className="leading-snug">
+                      <span className="mr-1 text-f1-red">{opt.letter}.</span>
+                      {opt.text}
+                    </span>
+                    {isCorrect && (
+                      <span className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#15803D] text-base font-bold text-white shadow">
                         ✓
                       </span>
                     )}
-                    {occupantChips[0] && !isLocked && isWrong && (
-                      <span className="absolute -bottom-2 -right-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#DC0000] text-sm font-bold text-white shadow">
+                    {isWrong && (
+                      <span className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#DC0000] text-base font-bold text-white shadow">
                         ✗
                       </span>
                     )}
-                  </div>
-                ) : (
-                  // 1 คำถามมีหลายคำตอบ — แสดงเป็นช่องแยกต่อการ์ด (ไม่ใช่กล่องเดียวรวมกัน) จำนวนช่อง = จำนวนคำตอบที่ต้องการ
-                  // ทุกช่องใช้ data-dropbox-id เดียวกัน (= pair.id) เพราะวางการ์ดถูกช่องไหนก็ได้ในแถวเดียวกัน
-                  <div
-                    className={cn(
-                      "relative grid h-full gap-2 rounded-xl p-1 transition-colors",
-                      isLocked && "f1-correct-bounce",
-                      !isLocked && isWrong && "f1-shake",
-                    )}
-                    style={{ gridTemplateColumns: `repeat(${capacity}, minmax(0, 1fr))` }}
-                  >
-                    {Array.from({ length: capacity }, (_, i) => {
-                      const chip = occupantChips[i];
-                      const isWrongCard = Boolean(chip) && wrongChipIds.has(chip!.id);
-                      return (
-                        <div
-                          key={i}
-                          data-dropbox-id={pair.id}
-                          onClick={() => {
-                            if (!chip) handleSlotClick(pair.id);
-                          }}
-                          className={cn(
-                            "relative flex h-full items-center justify-center rounded-lg border-4 border-dashed border-[#8B8B95] bg-white/70 text-sm transition-colors",
-                            !chip && "cursor-pointer",
-                            chip && "border-solid border-f1-ink bg-white",
-                            isLocked && "border-solid border-[#15803D] bg-f1-ok-bg",
-                            isWrongCard && "border-solid border-[#DC0000] bg-[#DC0000]/10",
-                          )}
-                        >
-                          {chip ? (
-                            renderChip(chip)
-                          ) : (
-                            <span className="f1-font-mono px-1 text-center text-[10px] text-[#8B8B95]">
-                              คลิกช่องเพื่อเลือกคำตอบ
-                            </span>
-                          )}
-                          {chip && !isLocked && !locked && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeChipFromSlot(pair.id, chip.id);
-                              }}
-                              className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#DC0000] text-[10px] font-bold text-white"
-                              aria-label="ลบการ์ดออกจากช่อง"
-                            >
-                              ✕
-                            </button>
-                          )}
-                          {chip && isLocked && (
-                            <span className="absolute -bottom-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-[#15803D] text-xs font-bold text-white shadow">
-                              ✓
-                            </span>
-                          )}
-                          {isWrongCard && (
-                            <span className="absolute -bottom-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-[#DC0000] text-xs font-bold text-white shadow">
-                              ✗
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {isLocked && (
-                      <div className="f1-checkered-flash pointer-events-none absolute inset-0 rounded-xl" />
-                    )}
-                    {!isLocked && isWrong && (
-                      <div className="f1-redflag-flash pointer-events-none absolute inset-0 rounded-xl" />
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                    {isCorrect && <div className="f1-checkered-flash pointer-events-none absolute inset-0 rounded-xl" />}
+                    {isWrong && <div className="f1-redflag-flash pointer-events-none absolute inset-0 rounded-xl" />}
+                  </button>
+                );
+              })}
+            </div>
 
-        <div className="flex flex-col gap-4 fit:flex-row fit:items-center fit:gap-4">
-        <h2 className={cn(sectionTitle, "fit:shrink-0")}>🚦 RACE CONTROL</h2>
+            <p className="f1-font-display min-h-6 text-center text-sm font-bold" aria-live="polite">
+              {correctId !== null && <span className="text-[#15803D]">✅ ถูกต้อง!{qIndex < total - 1 ? " กำลังไปข้อถัดไป…" : ""}</span>}
+              {correctId === null && wrongIds.size > 0 && !over && (
+                <span className="text-[#DC0000]">❌ ยังไม่ถูก ลองเลือกใหม่อีกครั้ง</span>
+              )}
+            </p>
+          </div>
+        )}
 
-        <div className="flex flex-wrap justify-center gap-2 fit:ml-auto fit:shrink-0">
-          {!locked && (
-            <Button
-              variant="outline"
-              className="f1-font-display border-f1-line-strong bg-white text-f1-ink hover:bg-zinc-100"
-              onClick={clearAnswers}
-            >
-              ล้างคำตอบ
-            </Button>
-          )}
-          {/* บนจอ Station รีเซ็ตแล้วเวลาเริ่มใหม่ = เลี่ยงการหมดเวลา จึงไม่ให้กด */}
-          {!embedded && (
+        {!embedded && phase !== "idle" && !over && (
+          <div className="flex justify-center">
             <Button
               variant="outline"
               className="f1-font-display border-[#DC0000] bg-white text-[#DC0000] hover:bg-[#DC0000]/10"
               onClick={resetAll}
             >
-              รีเซ็ตทั้งหมด
+              เริ่มใหม่ทั้งหมด
             </Button>
-          )}
-        </div>
-        </div>
-
-        <div className="f1-font-display space-y-1 pt-4 text-xs text-f1-mute fit:flex fit:justify-between fit:gap-6 fit:space-y-0 fit:overflow-hidden fit:whitespace-nowrap fit:pt-0 fit:text-[10px]">
-          <p>* ซ้าย = คำถามคงที่ • ขวา = คำตอบ • คลิกช่องว่างเพื่อเลือกคำตอบ</p>
-          <p>I-DOJO F1 RACING RED • LEFT QUESTION • RIGHT ANSWER • FERRARI RED #DC0000 • GREEN #22C55E</p>
-        </div>
+          </div>
+        )}
       </main>
 
-      {showHelp && (
-        <div
-          className="fixed inset-0 z-[65] flex items-center justify-center overflow-y-auto bg-black/60 p-4"
-          onClick={() => setShowHelp(false)}
-        >
-          <div
-            className="f1-font-display relative my-auto w-full max-w-xl rounded-sm border-4 border-[#DC0000] bg-white p-6 text-sm text-f1-ink"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setShowHelp(false)}
-              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-[#DC0000] font-bold text-white"
-              aria-label="ปิดวิธีเล่น"
-            >
-              ✕
-            </button>
-            <h2 className="mb-3 font-bold text-f1-red">📋 วิธีเล่น (แบบคลิก)</h2>
-            {howToList}
-          </div>
-        </div>
-      )}
+      {summary?.allCorrect && showSummary && <Confetti />}
 
-      {pickerBoxId && (
-        <div
-          className="f1-backdrop-fade fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/70 p-4"
-          onClick={() => setPickerBoxId(null)}
-        >
-          <div
-            className="f1-font-display f1-modal-pop relative my-auto w-full max-w-3xl rounded-sm border-4 border-[#DC0000] bg-white p-4 text-f1-ink"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setPickerBoxId(null)}
-              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-[#DC0000] font-bold text-white"
-              aria-label="ปิด"
-            >
-              ✕
-            </button>
-            <h3 className="mb-3 text-center text-lg font-bold text-f1-red">เลือกคำตอบใส่ช่องนี้</h3>
-            {pool.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[#8B8B95]">คลังว่างแล้ว — ไม่มีคำตอบให้เลือก</p>
-            ) : (
-              <div className="grid max-h-[65vh] grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3">
-                {pool.map((chip) => (
-                  <button
-                    key={chip.id}
-                    type="button"
-                    onClick={() => pickForBox(chip.id)}
-                    className="flex flex-col overflow-hidden rounded-md border-2 border-f1-line text-left hover:border-[#DC0000]"
-                  >
-                    {chip.image && (
-                      <img
-                        src={chip.image}
-                        alt=""
-                        draggable={false}
-                        className="aspect-video w-full bg-zinc-100 object-contain"
-                      />
-                    )}
-                    <span className="p-2 text-sm font-bold">
-                      <span className="mr-1 text-f1-red">{chip.letter}.</span>
-                      {chip.text}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {modalData?.allCorrect && <Confetti />}
-
-      {modalData && tier && (
+      {summary && tier && showSummary && (
         <div
           className={cn(
             "fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/60 p-4",
@@ -804,17 +546,15 @@ export function PlayPage() {
           <div className="f1-font-display relative my-auto w-full max-w-lg rounded-sm border-4 border-[#DC0000] bg-white p-6 text-f1-ink">
             <button
               type="button"
-              onClick={() => setModalData(null)}
+              onClick={() => setShowSummary(false)}
               className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-[#DC0000] font-bold text-white"
-              aria-label="ปิดผลตรวจ"
+              aria-label="ปิดสรุปผล"
             >
               ✕
             </button>
-            <p className="px-6 text-center text-xs font-medium tracking-widest text-f1-red">
-              🏆 RACE RESULT • SUMMARY
-            </p>
+            <p className="px-6 text-center text-xs font-medium tracking-widest text-f1-red">🏆 RACE RESULT • SUMMARY</p>
             <p className="mt-1 px-6 text-center text-2xl font-bold">
-              {modalData.isTimeout && "⏰ หมดเวลา! "}
+              {summary.timeout && "⏰ หมดเวลา! "}
               {tier.title}
             </p>
             {tier.sub && <p className="mt-1 text-center text-sm text-f1-red">{tier.sub}</p>}
@@ -844,85 +584,33 @@ export function PlayPage() {
             <div className="f1-font-mono mt-4 grid grid-cols-3 gap-2 text-center text-sm">
               <div className="rounded-sm bg-zinc-100 p-2">
                 <p className="text-[10px] text-f1-red">TIME USED</p>
-                <p className="text-lg font-bold">{formatTime(modalData.timeUsedSeconds)}</p>
+                <p className="text-lg font-bold">{formatTime(summary.timeUsedSeconds)}</p>
               </div>
               <div className="rounded-sm bg-zinc-100 p-2">
-                <p className="text-[10px] text-f1-red">CORRECT</p>
+                <p className="text-[10px] text-f1-red">FIRST TRY</p>
                 <p className="text-lg font-bold">
-                  {modalData.score}/{modalData.total}
+                  {summary.firstTry}/{summary.total}
                 </p>
               </div>
               <div className="rounded-sm bg-zinc-100 p-2">
                 <p className="text-[10px] text-f1-red">ACCURACY</p>
-                <p className="text-lg font-bold">{Math.round((modalData.score / modalData.total) * 100)}%</p>
+                <p className="text-lg font-bold">{Math.round((summary.firstTry / summary.total) * 100)}%</p>
               </div>
             </div>
 
-            <p className="mt-4 text-center font-bold text-f1-red">ผลตรวจทีละข้อ</p>
-            <div className="mt-2 max-h-[40vh] space-y-3 overflow-y-auto pr-1">
-              {game.pairs.map((pair) => {
-                const isCorrect = lockedCorrect.has(pair.id);
-                const w = modalData.wrong.find((x) => x.pairId === pair.id);
-                const hasWrongCard = w?.placedCards.some((c) => !c.correct) ?? false;
-                return (
-                  <div key={pair.id} className="space-y-2 rounded-sm border border-f1-line bg-zinc-100 p-3">
-                    <h4 className="font-bold">🏷️ {pair.promptText || "(ภาพ)"}</h4>
-                    {isCorrect ? (
-                      <p className="rounded-sm border border-green-200 bg-f1-ok-bg px-2 py-1 text-sm text-f1-ok-ink">
-                        ✅ ถูกแล้ว
-                      </p>
-                    ) : w && w.placedCards.length > 0 ? (
-                      // แสดงการ์ดที่วางไว้ทีละใบ บอกถูก/ผิดเป็นรายใบ ไม่รวมเป็นก้อนเดียว
-                      <>
-                        <div className="flex flex-wrap gap-1.5">
-                          {w.placedCards.map((c, i) => (
-                            <span
-                              key={i}
-                              className={cn(
-                                "rounded-sm border px-2 py-1 text-sm",
-                                c.correct
-                                  ? "border-green-200 bg-f1-ok-bg text-f1-ok-ink"
-                                  : "border-red-200 bg-f1-bad-bg text-f1-bad",
-                              )}
-                            >
-                              {c.correct ? "✅" : "❌"} {c.label}
-                            </span>
-                          ))}
-                        </div>
-                        {!hasWrongCard && w.missingCount > 0 && (
-                          <p className="text-xs text-amber-700">⚠️ ถูกหมดแล้ว แต่ยังขาดอีก {w.missingCount} ใบ</p>
-                        )}
-                        {showAnswerKey && (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {w.correctCards.map((label, i) => (
-                              <span
-                                key={i}
-                                className="rounded-sm border border-green-200 bg-f1-ok-bg px-2 py-1 text-sm text-f1-ok-ink"
-                              >
-                                ✅ {label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p className="rounded-sm border border-f1-line bg-white px-2 py-1 text-sm text-f1-mute">
-                        ⬜ ยังไม่ได้ใส่คำตอบ
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+            <p className="mt-4 text-center font-bold text-f1-red">ผลทีละข้อ</p>
+            <div className="mt-2 max-h-[40vh] space-y-2 overflow-y-auto pr-1">
+              {game.pairs.map((p, i) => (
+                <div key={p.id} className="flex items-start justify-between gap-3 rounded-sm border border-f1-line bg-zinc-100 p-2 text-sm">
+                  <span className="min-w-0 break-words font-bold">
+                    {i + 1}. {p.promptText || "(ภาพ)"}
+                  </span>
+                  <span className="shrink-0">
+                    {!(p.id in solved) ? "⬜ ยังไม่ได้ตอบ" : solved[p.id] ? "✅ ถูกครั้งแรก" : "🔁 ถูกหลังลองใหม่"}
+                  </span>
+                </div>
+              ))}
             </div>
-
-            {modalData.wrong.length > 0 && !showAnswerKey && (
-              <Button
-                className="f1-font-display mt-4 w-full bg-[#DC0000] text-white hover:bg-[#b00000]"
-                onClick={() => setShowAnswerKey(true)}
-              >
-                👁️ เฉลย
-              </Button>
-            )}
 
             {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ: ผ่าน → สถานีถัดไป, ไม่ผ่าน → โหลดเกมใหม่ (docs/STATION_ACTIVITY.md ของ portal) */}
             {resultHandedOff && (
@@ -933,22 +621,13 @@ export function PlayPage() {
               </p>
             )}
 
-            <div className="mt-5 flex justify-center gap-2">
-              {!embedded && (
-                <Button
-                  variant="outline"
-                  className="border-[#DC0000] bg-white text-[#DC0000] hover:bg-[#DC0000]/10"
-                  onClick={resetAll}
-                >
+            {!embedded && (
+              <div className="mt-5 flex justify-center">
+                <Button className="bg-[#DC0000] text-white hover:bg-[#b00000]" onClick={resetAll}>
                   เล่นใหม่
                 </Button>
-              )}
-              {!modalData.allCorrect && !modalData.isTimeout && !resultHandedOff && (
-                <Button className="bg-[#DC0000] text-white hover:bg-[#b00000]" onClick={retryWrongOnly}>
-                  ลองใหม่เฉพาะข้อผิด
-                </Button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}

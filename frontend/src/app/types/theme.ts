@@ -1,11 +1,12 @@
 export type PromptType = "text" | "image" | "mixed";
 
-// คำตอบ 1 ใบ (การ์ดในคลังคำตอบ) — 1 คำถามมีได้หลายคำตอบ ต้องวางให้ครบทุกใบถึงจะถูก
+// ตัวเลือกคำตอบ 1 ข้อ — แต่ละคำถามมีหลายตัวเลือก และมีตัวที่ถูก 1 ตัว (correct = true)
 export interface AnswerOption {
   id: string;
   type: PromptType;
   text: string;
   image?: string;
+  correct?: boolean;
 }
 
 export interface MatchPair {
@@ -14,7 +15,9 @@ export interface MatchPair {
   promptType: PromptType;
   promptText: string;
   promptImage?: string; // data URL หรือลิงก์ http(s)
-  // คำตอบ (ฝั่งขวา / คลังคำตอบ) — ต้องมีอย่างน้อย 1 ใบ
+  // VDO ของข้อนี้ — ผู้เล่นต้องดูจนจบก่อนถึงจะเห็นตัวเลือก (ไม่มี = ข้ามไปแสดงตัวเลือกเลย)
+  video?: string;
+  // ตัวเลือกคำตอบ — ควรมีอย่างน้อย 2 ตัว และมีตัวที่ถูกตัวเดียว
   answers: AnswerOption[];
 }
 

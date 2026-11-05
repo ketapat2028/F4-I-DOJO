@@ -12,12 +12,18 @@ export function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
-export function makeEmptyAnswer(): AnswerOption {
-  return { id: genId(), type: "text", text: "" };
+export function makeEmptyAnswer(correct = false): AnswerOption {
+  return { id: genId(), type: "text", text: "", correct };
 }
 
+// ข้อใหม่: ตัวเลือก 2 ตัว ตัวแรกเป็นคำตอบที่ถูก
 export function makeEmptyPair(): MatchPair {
-  return { id: genId(), promptType: "text", promptText: "", answers: [makeEmptyAnswer()] };
+  return {
+    id: genId(),
+    promptType: "text",
+    promptText: "",
+    answers: [makeEmptyAnswer(true), makeEmptyAnswer()],
+  };
 }
 
 // ===== รูปแบบข้อมูลสำหรับ Import/Export (ตามโครงสร้าง EDIT MODE) =====
@@ -26,11 +32,13 @@ interface SpecSide {
   type?: string;
   text?: string;
   imageUrl?: string;
+  correct?: boolean;
 }
 
 export interface SpecRecord {
   id?: string;
   question?: SpecSide;
+  videoUrl?: string;
   // answer = รูปแบบเก่า (คำตอบเดียว) เหลือไว้อ่านข้อมูลเดิม ไม่เขียนออกแล้ว — ดู fromAnyRecord
   answer?: SpecSide;
   answers?: SpecSide[];
@@ -90,26 +98,38 @@ function seedPairs(): MatchPair[] {
     ["Safety Car", "รถนำขบวนช่วงอุบัติเหตุ"],
     ["DRS Zone", "โซนที่อนุญาตให้เปิด DRS"],
   ];
-  const pairs: MatchPair[] = textSeeds.map(([q, a], i) => ({
-    id: `p${i + 1}`,
-    promptType: "text",
-    promptText: q,
-    answers: [{ id: genId(), type: "text", text: a }],
-  }));
+  // ตัวเลือกหลอกของแต่ละข้อ = คำตอบของข้อถัดไป 2 ข้อ (วนกลับ)
+  const pairs: MatchPair[] = textSeeds.map(([q, a], i) => {
+    const wrong = [1, 2].map((d) => textSeeds[(i + d) % textSeeds.length][1]);
+    return {
+      id: `p${i + 1}`,
+      promptType: "text",
+      promptText: q,
+      answers: [a, ...wrong].map((text, k) => ({ id: genId(), type: "text" as const, text, correct: k === 0 })),
+    };
+  });
   pairs.push(
     {
       id: "p7",
       promptType: "image",
       promptText: "Ferrari SF-23",
       promptImage: IMG_FERRARI_CAR,
-      answers: [{ id: genId(), type: "image", text: "Ferrari", image: IMG_FERRARI_LOGO }],
+      answers: [
+        { id: genId(), type: "image", text: "Ferrari", image: IMG_FERRARI_LOGO, correct: true },
+        { id: genId(), type: "text", text: "McLaren" },
+        { id: genId(), type: "text", text: "Mercedes" },
+      ],
     },
     {
       id: "p8",
       promptType: "mixed",
       promptText: "ทีมแชมป์โลก 2023 คือ?",
       promptImage: IMG_TROPHY,
-      answers: [{ id: genId(), type: "image", text: "Red Bull Racing", image: IMG_REDBULL }],
+      answers: [
+        { id: genId(), type: "image", text: "Red Bull Racing", image: IMG_REDBULL, correct: true },
+        { id: genId(), type: "text", text: "Ferrari" },
+        { id: genId(), type: "text", text: "Mercedes" },
+      ],
     },
   );
   return pairs;
@@ -119,7 +139,14 @@ export function toSpecRecord(pair: MatchPair): SpecRecord {
   return {
     id: pair.id,
     question: { type: pair.promptType, text: pair.promptText, imageUrl: pair.promptImage ?? "" },
-    answers: pair.answers.map((a) => ({ id: a.id, type: a.type, text: a.text, imageUrl: a.image ?? "" })),
+    videoUrl: pair.video ?? "",
+    answers: pair.answers.map((a) => ({
+      id: a.id,
+      type: a.type,
+      text: a.text,
+      imageUrl: a.image ?? "",
+      correct: Boolean(a.correct),
+    })),
   };
 }
 
@@ -142,7 +169,15 @@ function toAnswerOption(raw: unknown): AnswerOption {
     type: normalizeType(r.type),
     text: String(r.text ?? ""),
     image: optString(r.imageUrl),
+    correct: r.correct === true,
   };
+}
+
+// ข้อมูลรูปแบบเก่าไม่มี flag correct (ทุกตัวเลือกคือคำตอบที่ถูก) — ให้ตัวแรกเป็นตัวที่ถูก และตัวอื่นไม่ถูก
+// ข้อมูลที่มีหลายตัวถูก เก็บแค่ตัวแรกที่ถูก (เกมใหม่ตอบได้ครั้งละ 1 ตัวเลือก)
+function normalizeCorrect(answers: AnswerOption[]): AnswerOption[] {
+  const first = Math.max(0, answers.findIndex((a) => a.correct));
+  return answers.map((a, i) => ({ ...a, correct: i === first }));
 }
 
 // รองรับ 3 รูปแบบ: (1) answers[] ใหม่ (2) answer object เดี่ยวรูปแบบก่อนหน้า (3) answer เป็นข้อความล้วนแบบเก่าสุด
@@ -171,7 +206,8 @@ function fromAnyRecord(record: Record<string, unknown>): MatchPair {
     promptType: normalizeType(q ? q.type : (record.type ?? record.promptType)),
     promptText: String((q ? q.text : (record.topic ?? record.promptText)) ?? ""),
     promptImage: optString(q ? q.imageUrl : (record.imageUrl ?? record.promptImage)),
-    answers: extractAnswers(record),
+    video: optString(record.videoUrl),
+    answers: normalizeCorrect(extractAnswers(record)),
   };
 }
 
@@ -262,6 +298,34 @@ export async function verifyAdmin(adminSecret: string): Promise<boolean> {
   return true;
 }
 
+// VDO เก็บเป็นไฟล์บน server (ใหญ่เกินกว่าจะใส่ DB) คืน URL /I-DOJO/api/videos/<file>
+// fetch ไม่มี progress — ใช้ XHR เพื่อให้หน้า editor โชว์ % ได้ (ไฟล์ VDO ใช้เวลาอัปโหลดนาน)
+export function uploadVideo(file: File, adminSecret: string, onProgress?: (pct: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API}/upload-video`);
+    xhr.setRequestHeader("x-admin-secret", adminSecret);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((100 * e.loaded) / e.total));
+    };
+    xhr.onerror = () => reject(new Error("อัปโหลด VDO ไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)"));
+    xhr.onload = () => {
+      let body: { file?: string; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // ไม่ใช่ JSON
+      }
+      if (xhr.status === 401) return reject(new UnauthorizedError());
+      if (xhr.status >= 200 && xhr.status < 300 && body.file) return resolve(`${API}/videos/${body.file}`);
+      reject(new Error(body.error ?? `อัปโหลด VDO ไม่สำเร็จ (${xhr.status})`));
+    };
+    const form = new FormData();
+    form.append("video", file, file.name);
+    xhr.send(form);
+  });
+}
+
 export async function uploadImage(file: Blob, adminSecret: string): Promise<string> {
   const form = new FormData();
   const name = file instanceof File ? file.name : "image.jpg";
@@ -305,18 +369,21 @@ function sideComplete(type: PromptType, text: string, image?: string): boolean {
   return Boolean(text.trim()) && Boolean(image);
 }
 
+// ข้อสมบูรณ์ = คำถามครบ + มีตัวเลือกอย่างน้อย 2 ตัว (ครบทุกตัว) + มีตัวที่ถูกพอดี 1 ตัว
+// VDO ไม่บังคับ (ไม่มี VDO = แสดงตัวเลือกเลย) แต่ editor เตือนเมื่อว่าง
 export function isPairComplete(p: MatchPair): boolean {
   return (
     sideComplete(p.promptType, p.promptText, p.promptImage) &&
-    p.answers.length > 0 &&
-    p.answers.every((a) => sideComplete(a.type, a.text, a.image))
+    p.answers.length >= 2 &&
+    p.answers.every((a) => sideComplete(a.type, a.text, a.image)) &&
+    p.answers.filter((a) => a.correct).length === 1
   );
 }
 
 export function parseImportedPairs(raw: string): MatchPair[] {
   const pairs = recordsToPairs(JSON.parse(raw)).filter(isPairComplete);
   if (pairs.length < 2) {
-    throw new Error("ไฟล์ต้องมีอย่างน้อย 2 คู่ และแต่ละคู่ต้องมีคำถามกับคำตอบครบ");
+    throw new Error("ไฟล์ต้องมีอย่างน้อย 2 ข้อ และแต่ละข้อต้องมีคำถาม ตัวเลือกอย่างน้อย 2 ตัว และมีตัวที่ถูก 1 ตัว");
   }
   return pairs;
 }
