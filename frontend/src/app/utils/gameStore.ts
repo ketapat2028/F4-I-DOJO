@@ -3,10 +3,18 @@ import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme"
 // key เดิมตอนยังเก็บใน localStorage — เหลือไว้อ่านเพื่อย้ายข้อมูลขึ้น server เท่านั้น (readLegacyLocalGame)
 export const PAIRS_KEY = "f1-dojo-pairs-v4-click-match";
 const META_KEY = "idojo.f1.meta.v4";
-const DEFAULT_NAME = "I-DOJO - PIT 5 DOMINO IMPACT";
+const DEFAULT_NAME = "I-DOJO - PIT 4 5S";
 // ชื่อตัวอย่างเดิมที่ยังค้างใน DB — อ่านแล้วแทนด้วยชื่อใหม่ (บันทึกจาก editor ครั้งถัดไปจะเขียนชื่อใหม่ลง DB)
-const LEGACY_NAMES = ["DOJO · F1 RACING RED"];
+const LEGACY_NAMES = ["DOJO · F1 RACING RED", "I-DOJO - PIT 5 DOMINO IMPACT"];
 const DEFAULT_TIME = 300;
+const DEFAULT_PASS_PERCENT = 70;
+// ข้อแบบเก่า (ไม่มีช่อง correct) แปลงเป็นเลือกตอบ: คำตอบเดิม = ตัวถูก + ตัวลวงจากข้ออื่นอีกไม่เกินเท่านี้
+const LEGACY_DISTRACTORS = 3;
+
+export const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+export const IMAGE_MAX_MB = 10;
+export const VIDEO_EXTS = [".mp4", ".m4v", ".webm", ".ogv"];
+export const VIDEO_MAX_MB = 300;
 
 // crypto.randomUUID ใช้ได้เฉพาะ secure context — เปิดผ่าน http://<IP ของ Pi> จะไม่มี
 export function genId(): string {
@@ -14,12 +22,12 @@ export function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
-export function makeEmptyAnswer(): AnswerOption {
-  return { id: genId(), type: "text", text: "" };
+export function makeEmptyAnswer(correct = false): AnswerOption {
+  return { id: genId(), type: "text", text: "", correct };
 }
 
 export function makeEmptyPair(): MatchPair {
-  return { id: genId(), promptType: "text", promptText: "", answers: [makeEmptyAnswer()] };
+  return { id: genId(), promptType: "text", promptText: "", answers: [makeEmptyAnswer(true), makeEmptyAnswer()] };
 }
 
 // ===== รูปแบบข้อมูลสำหรับ Import/Export (ตามโครงสร้าง EDIT MODE) =====
@@ -28,11 +36,13 @@ interface SpecSide {
   type?: string;
   text?: string;
   imageUrl?: string;
+  correct?: boolean;
 }
 
 export interface SpecRecord {
   id?: string;
   question?: SpecSide;
+  videoUrl?: string;
   // answer = รูปแบบเก่า (คำตอบเดียว) เหลือไว้อ่านข้อมูลเดิม ไม่เขียนออกแล้ว — ดู fromAnyRecord
   answer?: SpecSide;
   answers?: SpecSide[];
@@ -121,7 +131,14 @@ export function toSpecRecord(pair: MatchPair): SpecRecord {
   return {
     id: pair.id,
     question: { type: pair.promptType, text: pair.promptText, imageUrl: pair.promptImage ?? "" },
-    answers: pair.answers.map((a) => ({ id: a.id, type: a.type, text: a.text, imageUrl: a.image ?? "" })),
+    videoUrl: pair.video ?? "",
+    answers: pair.answers.map((a) => ({
+      id: a.id,
+      type: a.type,
+      text: a.text,
+      imageUrl: a.image ?? "",
+      correct: Boolean(a.correct),
+    })),
   };
 }
 
@@ -144,6 +161,8 @@ function toAnswerOption(raw: unknown): AnswerOption {
     type: normalizeType(r.type),
     text: String(r.text ?? ""),
     image: optString(r.imageUrl),
+    // ไม่มีช่องนี้ = ข้อมูลรูปแบบเก่า (ดู upgradeLegacyPairs)
+    correct: typeof r.correct === "boolean" ? r.correct : undefined,
   };
 }
 
@@ -173,6 +192,7 @@ function fromAnyRecord(record: Record<string, unknown>): MatchPair {
     promptType: normalizeType(q ? q.type : (record.type ?? record.promptType)),
     promptText: String((q ? q.text : (record.topic ?? record.promptText)) ?? ""),
     promptImage: optString(q ? q.imageUrl : (record.imageUrl ?? record.promptImage)),
+    video: optString(record.videoUrl ?? record.video),
     answers: extractAnswers(record),
   };
 }
@@ -186,10 +206,35 @@ function recordsToPairs(data: unknown): MatchPair[] {
   const pairs = list.filter(isObject).map(fromAnyRecord);
   // id ซ้ำจะทำให้การ์ดชนกัน จึงสร้าง id ใหม่ให้ตัวที่ซ้ำ
   const seen = new Set<string>();
-  return pairs.map((p) => {
-    if (seen.has(p.id)) return { ...p, id: genId() };
-    seen.add(p.id);
-    return p;
+  return upgradeLegacyPairs(
+    pairs.map((p) => {
+      if (seen.has(p.id)) return { ...p, id: genId() };
+      seen.add(p.id);
+      return p;
+    }),
+  );
+}
+
+const answerKey = (a: AnswerOption) => `${a.type}|${a.text.trim()}|${a.image ?? ""}`;
+
+// ข้อแบบเก่า (เกมจับคู่ — ไม่มี correct ในตัวเลือกไหนเลย) → ข้อเลือกตอบ
+// คำตอบแรกของข้อ = ตัวถูก · ตัวลวง = คำตอบแรกของข้อถัด ๆ ไป (ไม่ซ้ำกัน)
+// คำตอบที่ 2 เป็นต้นไปของข้อเดิมตัดทิ้ง เพราะในเกมเดิมมันก็ "ถูก" เหมือนกัน เอามาเป็นตัวลวงไม่ได้
+function upgradeLegacyPairs(pairs: MatchPair[]): MatchPair[] {
+  return pairs.map((p, i) => {
+    if (p.answers.some((a) => a.correct !== undefined)) {
+      return { ...p, answers: p.answers.map((a) => ({ ...a, correct: Boolean(a.correct) })) };
+    }
+    const correct: AnswerOption = { ...p.answers[0], correct: true };
+    const used = new Set([answerKey(correct)]);
+    const distractors: AnswerOption[] = [];
+    for (let k = 1; k < pairs.length && distractors.length < LEGACY_DISTRACTORS; k++) {
+      const src = pairs[(i + k) % pairs.length].answers[0];
+      if (!src || used.has(answerKey(src))) continue;
+      used.add(answerKey(src));
+      distractors.push({ ...src, id: genId(), correct: false });
+    }
+    return { ...p, answers: [correct, ...distractors] };
   });
 }
 
@@ -210,7 +255,12 @@ export class UnauthorizedError extends Error {
 }
 
 function toPayload(game: Theme) {
-  return { name: game.name, timeLimitSeconds: game.timeLimitSeconds, pairs: game.pairs.map(toSpecRecord) };
+  return {
+    name: game.name,
+    timeLimitSeconds: game.timeLimitSeconds,
+    passPercent: game.passPercent,
+    pairs: game.pairs.map(toSpecRecord),
+  };
 }
 
 function fromPayload(data: unknown): Theme {
@@ -219,6 +269,9 @@ function fromPayload(data: unknown): Theme {
     id: "f1-board",
     name: typeof m.name === "string" && m.name && !LEGACY_NAMES.includes(m.name) ? m.name : DEFAULT_NAME,
     timeLimitSeconds: Number.isFinite(m.timeLimitSeconds) ? Math.max(0, m.timeLimitSeconds as number) : DEFAULT_TIME,
+    passPercent: Number.isFinite(m.passPercent)
+      ? Math.min(100, Math.max(1, Math.round(m.passPercent as number)))
+      : DEFAULT_PASS_PERCENT,
     pairs: recordsToPairs(data),
     createdAt: 0,
     updatedAt: 0,
@@ -264,7 +317,26 @@ export async function verifyAdmin(adminSecret: string): Promise<boolean> {
   return true;
 }
 
+function extOf(name: string): string {
+  const m = name.toLowerCase().match(/\.[^.]+$/);
+  return m ? m[0] : "";
+}
+
+// ตรวจชนิด/ขนาดไฟล์ก่อนส่ง (server ตรวจซ้ำอีกชั้น) คืนข้อความ error หรือ null
+export function checkImageFile(file: File): string | null {
+  if (!IMAGE_EXTS.includes(extOf(file.name))) return `รองรับเฉพาะรูป ${IMAGE_EXTS.join(" ")}`;
+  if (file.size > IMAGE_MAX_MB * 1024 * 1024) return `รูปใหญ่เกิน ${IMAGE_MAX_MB}MB`;
+  return null;
+}
+
+export function checkVideoFile(file: File): string | null {
+  if (!VIDEO_EXTS.includes(extOf(file.name))) return `รองรับเฉพาะ VDO ${VIDEO_EXTS.join(" ")}`;
+  if (file.size > VIDEO_MAX_MB * 1024 * 1024) return `VDO ใหญ่เกิน ${VIDEO_MAX_MB}MB`;
+  return null;
+}
+
 export async function uploadImage(file: Blob, adminSecret: string): Promise<string> {
+  if (file.size > IMAGE_MAX_MB * 1024 * 1024) throw new Error(`รูปใหญ่เกิน ${IMAGE_MAX_MB}MB`);
   const form = new FormData();
   const name = file instanceof File ? file.name : "image.jpg";
   form.append("image", file, name);
@@ -278,9 +350,42 @@ export async function uploadImage(file: Blob, adminSecret: string): Promise<stri
   return `${API}/images/${id}`;
 }
 
+// VDO ใหญ่ (ถึง 300MB) ใช้ XMLHttpRequest เพราะ fetch ไม่บอกความคืบหน้าการอัปโหลด
+// onProgress ได้ค่า 0–100 · คืน URL (/I-DOJO/api/videos/<file>)
+export function uploadVideo(file: File, adminSecret: string, onProgress?: (percent: number) => void): Promise<string> {
+  const invalid = checkVideoFile(file);
+  if (invalid) return Promise.reject(new Error(invalid));
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API}/upload-video`);
+    xhr.setRequestHeader("x-admin-secret", adminSecret);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((100 * e.loaded) / e.total));
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) return reject(new UnauthorizedError());
+      let body: { filename?: string; error?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // ไม่มี body เป็น JSON
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || !body.filename) {
+        return reject(new Error(`อัปโหลด VDO ไม่สำเร็จ (${xhr.status})${body.error ? `: ${body.error}` : ""}`));
+      }
+      resolve(`${API}/videos/${body.filename}`);
+    };
+    xhr.onerror = () => reject(new Error("อัปโหลด VDO ไม่สำเร็จ (เชื่อมต่อ server ไม่ได้)"));
+    const form = new FormData();
+    form.append("video", file, file.name);
+    xhr.send(form);
+  });
+}
+
 // ชุดตัวอย่าง F1 ให้ editor ใช้เป็นจุดเริ่มเมื่อ server ยังไม่มีข้อมูล
 export function makeDemoGame(): Theme {
-  return { ...fromPayload({}), pairs: seedPairs() };
+  // seed เขียนแบบเก่า (คำตอบเดียวต่อข้อ) — แปลงเป็นเลือกตอบ ตัวลวงมาจากข้ออื่น
+  return { ...fromPayload({}), pairs: upgradeLegacyPairs(seedPairs()) };
 }
 
 // ข้อมูลเดิมที่เคยเก็บใน localStorage ของ browser นี้ (ก่อนย้ายไป backend) — ใช้ย้ายขึ้น server ครั้งเดียว
@@ -301,7 +406,7 @@ export function exportGameJson(game: Theme): string {
   return JSON.stringify(toPayload(game), null, 2);
 }
 
-function sideComplete(type: PromptType, text: string, image?: string): boolean {
+export function sideComplete(type: PromptType, text: string, image?: string): boolean {
   if (type === "text") return Boolean(text.trim());
   if (type === "image") return Boolean(image);
   return Boolean(text.trim()) && Boolean(image);
@@ -310,15 +415,16 @@ function sideComplete(type: PromptType, text: string, image?: string): boolean {
 export function isPairComplete(p: MatchPair): boolean {
   return (
     sideComplete(p.promptType, p.promptText, p.promptImage) &&
-    p.answers.length > 0 &&
-    p.answers.every((a) => sideComplete(a.type, a.text, a.image))
+    p.answers.length >= 2 &&
+    p.answers.every((a) => sideComplete(a.type, a.text, a.image)) &&
+    p.answers.filter((a) => a.correct).length === 1
   );
 }
 
 export function parseImportedPairs(raw: string): MatchPair[] {
   const pairs = recordsToPairs(JSON.parse(raw)).filter(isPairComplete);
   if (pairs.length < 2) {
-    throw new Error("ไฟล์ต้องมีอย่างน้อย 2 คู่ และแต่ละคู่ต้องมีคำถามกับคำตอบครบ");
+    throw new Error("ไฟล์ต้องมีข้อที่สมบูรณ์อย่างน้อย 2 ข้อ (คำถามครบ ตัวเลือกอย่างน้อย 2 ตัว และมีตัวที่ถูก 1 ตัว)");
   }
   return pairs;
 }

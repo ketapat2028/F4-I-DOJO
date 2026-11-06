@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/I-DOJO/api': {
-        target: 'http://localhost:5001',
+        target: 'http://localhost:5000',
         rewrite: (path) => path.replace('/I-DOJO', ''),
       },
     },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Lock, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, Film, FolderOpen, Lock, TriangleAlert, Wrench } from "lucide-react";
 import { useNavigate } from "react-router";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
@@ -7,6 +7,7 @@ import { Input } from "../components/ui/input";
 import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme";
 import { fileToUploadableImage } from "../utils/image";
 import {
+  checkImageFile,
   exportGameJson,
   getGame,
   isPairComplete,
@@ -17,13 +18,17 @@ import {
   parseImportedPairs,
   readLegacyLocalGame,
   saveGame,
+  sideComplete,
   UnauthorizedError,
   uploadImage,
+  uploadVideo,
+  VIDEO_EXTS,
+  VIDEO_MAX_MB,
   verifyAdmin,
 } from "../utils/gameStore";
 
 const MIN_PAIRS = 2;
-const MIN_ANSWERS = 1;
+const MIN_ANSWERS = 2;
 // รหัสผู้ดูแลเก็บไว้แค่ใน tab นี้ ปิด tab แล้วต้องใส่ใหม่
 const SECRET_KEY = "idojo.adminSecret";
 
@@ -82,7 +87,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
             type="button"
             onClick={() => onType(t)}
             className={`f1-font-display rounded-sm border px-3 py-1 text-xs font-medium ${
-              type === t ? "border-f1-brand bg-f1-brand text-white" : "border-f1-line bg-white text-zinc-700"
+              type === t ? "border-f1-brand bg-f1-brand text-f1-ink" : "border-f1-line bg-white text-zinc-700"
             }`}
           >
             {TYPE_LABEL[t]}
@@ -123,7 +128,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
               type="button"
               size="sm"
               disabled={uploading}
-              className="f1-font-display bg-f1-brand text-white hover:bg-f1-brand-dark"
+              className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
               onClick={() => fileRef.current?.click()}
             >
               <FolderOpen /> เลือกรูปจากเครื่อง
@@ -137,7 +142,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-f1-brand hover:bg-f1-brand/10 hover:text-f1-brand-dark"
+                className="text-f1-brand-ink hover:bg-f1-brand/10 hover:text-f1-brand-ink"
                 onClick={() => {
                   setFileName(null);
                   onImage(undefined);
@@ -148,6 +153,94 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// เหตุผลที่ข้อนี้ยังไม่สมบูรณ์ (ว่าง = เล่นได้) — กติกาเดียวกับ isPairComplete
+function pairProblems(p: MatchPair): string[] {
+  const out: string[] = [];
+  if (!sideComplete(p.promptType, p.promptText, p.promptImage)) out.push("คำถามยังไม่ครบตามรูปแบบที่เลือก");
+  if (p.answers.length < MIN_ANSWERS) out.push(`ต้องมีตัวเลือกอย่างน้อย ${MIN_ANSWERS} ตัว`);
+  const bad = p.answers.flatMap((a, i) => (sideComplete(a.type, a.text, a.image) ? [] : [i + 1]));
+  if (bad.length > 0) out.push(`ตัวเลือกที่ ${bad.join(", ")} ยังไม่ครบตามรูปแบบที่เลือก`);
+  const correct = p.answers.filter((a) => a.correct).length;
+  if (correct !== 1) out.push(correct === 0 ? "ยังไม่ได้เลือกตัวที่ถูก" : "เลือกตัวที่ถูกได้ตัวเดียว");
+  return out;
+}
+
+interface VideoFieldProps {
+  video?: string;
+  onVideo: (v: string | undefined) => void;
+  onUpload: (file: File, onProgress: (percent: number) => void) => Promise<string | undefined>;
+}
+
+function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [percent, setPercent] = useState<number | null>(null);
+  async function handleFile(file: File | null) {
+    if (!file) return;
+    setPercent(0);
+    const url = await onUpload(file, setPercent);
+    setPercent(null);
+    if (url) onVideo(url);
+  }
+  return (
+    <div className="space-y-2 rounded-sm border border-f1-line bg-zinc-50 p-3 text-sm text-zinc-700">
+      <p className="f1-font-display flex items-center gap-1.5 font-bold text-f1-ink">
+        <Film className="size-4 text-f1-brand-ink" /> VDO ของข้อนี้ (ไม่บังคับ — เล่นจบก่อนถึงจะแสดงตัวเลือก ผู้เล่นข้ามไม่ได้)
+      </p>
+      {video && <video src={video} controls preload="metadata" className="max-h-48 w-full rounded-sm bg-black" />}
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          value={video ?? ""}
+          onChange={(e) => onVideo(e.target.value || undefined)}
+          placeholder="วางลิงก์ VDO หรืออัปโหลด"
+          className="w-72 border-[#8B8B95] bg-white text-f1-ink"
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept={VIDEO_EXTS.join(",")}
+          className="hidden"
+          disabled={percent !== null}
+          onChange={(e) => {
+            handleFile(e.target.files?.[0] ?? null);
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={percent !== null}
+          className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+          onClick={() => fileRef.current?.click()}
+        >
+          <FolderOpen /> เลือก VDO จากเครื่อง
+        </Button>
+        {video && percent === null && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-f1-brand-ink hover:bg-f1-brand/10 hover:text-f1-brand-ink"
+            onClick={() => onVideo(undefined)}
+          >
+            ลบ VDO
+          </Button>
+        )}
+      </div>
+      {percent !== null ? (
+        <div className="space-y-1">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200">
+            <div className="h-full bg-f1-brand transition-all" style={{ width: `${percent}%` }} />
+          </div>
+          <p className="f1-font-mono text-xs text-f1-mute">กำลังอัปโหลด {percent}%</p>
+        </div>
+      ) : (
+        <p className="text-xs text-f1-mute">
+          {VIDEO_EXTS.join(" ")} ไม่เกิน {VIDEO_MAX_MB}MB
+        </p>
       )}
     </div>
   );
@@ -219,11 +312,26 @@ export function EditPage() {
   }
 
   async function handleUploadImage(file: File): Promise<string | undefined> {
+    const invalid = checkImageFile(file);
+    if (invalid) {
+      setStatus(invalid);
+      return undefined;
+    }
     try {
       return await uploadImage(await fileToUploadableImage(file), secret);
     } catch (e) {
       if (e instanceof UnauthorizedError) forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
       else setStatus(errorText(e, "อัปโหลดรูปไม่สำเร็จ"));
+      return undefined;
+    }
+  }
+
+  async function handleUploadVideo(file: File, onProgress: (percent: number) => void): Promise<string | undefined> {
+    try {
+      return await uploadVideo(file, secret, onProgress);
+    } catch (e) {
+      if (e instanceof UnauthorizedError) forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
+      else setStatus(errorText(e, "อัปโหลด VDO ไม่สำเร็จ"));
       return undefined;
     }
   }
@@ -234,7 +342,7 @@ export function EditPage() {
         <F1Header />
         <main className="mx-auto max-w-md space-y-3 p-6">
           <h1 className="f1-font-display flex items-center gap-2 text-2xl font-bold text-f1-ink">
-            <Lock className="size-6 text-f1-brand" /> EDIT MODE
+            <Lock className="size-6 text-f1-brand-ink" /> EDIT MODE
           </h1>
           <form
             className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4"
@@ -261,7 +369,7 @@ export function EditPage() {
               <Button
                 type="submit"
                 disabled={checkingSecret || !secretInput.trim()}
-                className="f1-font-display bg-f1-brand text-white hover:bg-f1-brand-dark"
+                className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
               >
                 {checkingSecret ? "กำลังตรวจ..." : "เข้าสู่ EDIT MODE"}
               </Button>
@@ -302,6 +410,32 @@ export function EditPage() {
     );
   }
 
+  function movePair(pairId: string, delta: -1 | 1) {
+    setGame((prev) => {
+      if (!prev) return prev;
+      const from = prev.pairs.findIndex((p) => p.id === pairId);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= prev.pairs.length) return prev;
+      const pairs = [...prev.pairs];
+      [pairs[from], pairs[to]] = [pairs[to], pairs[from]];
+      return { ...prev, pairs };
+    });
+  }
+
+  // ตัวที่ถูกเลือกได้ตัวเดียว — เลือกตัวใหม่ = ตัวอื่นกลายเป็นไม่ถูก
+  function setCorrect(pairId: string, answerId: string) {
+    setGame((prev) =>
+      prev
+        ? {
+            ...prev,
+            pairs: prev.pairs.map((p) =>
+              p.id === pairId ? { ...p, answers: p.answers.map((a) => ({ ...a, correct: a.id === answerId })) } : p,
+            ),
+          }
+        : prev,
+    );
+  }
+
   function updateAnswer(pairId: string, answerId: string, patch: Partial<AnswerOption>) {
     setGame((prev) =>
       prev
@@ -337,7 +471,15 @@ export function EditPage() {
             ...prev,
             pairs: prev.pairs.map((p) =>
               p.id === pairId && p.answers.length > MIN_ANSWERS
-                ? { ...p, answers: p.answers.filter((a) => a.id !== answerId) }
+                ? {
+                    ...p,
+                    answers: (() => {
+                      const removed = p.answers.find((a) => a.id === answerId);
+                      const rest = p.answers.filter((a) => a.id !== answerId);
+                      // ลบตัวที่ถูกทิ้ง → ให้ตัวแรกที่เหลือเป็นตัวถูกแทน (แก้ได้ทีหลัง)
+                      return removed?.correct ? rest.map((a, i) => ({ ...a, correct: i === 0 })) : rest;
+                    })(),
+                  }
                 : p,
             ),
           }
@@ -347,11 +489,9 @@ export function EditPage() {
 
   async function handleSave() {
     if (!game) return;
-    const badIndex = game.pairs.findIndex((p) => !isPairComplete(p));
-    if (badIndex !== -1) {
-      setStatus(
-        `คู่ที่ ${badIndex + 1} ยังไม่ครบ: ประเภทข้อความต้องมีข้อความ, ประเภทรูปภาพต้องมีรูป, ประเภทผสมต้องมีทั้งสองอย่าง`,
-      );
+    // ข้อที่ไม่สมบูรณ์บันทึกได้ (หน้าเล่นข้ามให้) แต่ต้องมีข้อที่เล่นได้อย่างน้อย 2 ข้อ
+    if (game.pairs.filter(isPairComplete).length < MIN_PAIRS) {
+      setStatus(`ต้องมีข้อที่สมบูรณ์อย่างน้อย ${MIN_PAIRS} ข้อถึงจะบันทึกได้ — ดูคำเตือนสีแดงในแต่ละข้อ`);
       return;
     }
     setSaving(true);
@@ -387,7 +527,7 @@ export function EditPage() {
     try {
       const pairs = parseImportedPairs(await file.text());
       setGame({ ...game, pairs });
-      setStatus(`นำเข้า ${pairs.length} คู่แล้ว`);
+      setStatus(`นำเข้า ${pairs.length} ข้อแล้ว`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "นำเข้าไฟล์ไม่สำเร็จ");
     }
@@ -398,7 +538,7 @@ export function EditPage() {
       <F1Header />
       <main className="mx-auto max-w-4xl space-y-4 p-6">
         <h1 className="f1-font-display flex items-center gap-2 text-2xl font-bold text-f1-ink">
-          <Wrench className="size-6 text-f1-brand" /> EDIT MODE • แก้ไขโจทย์
+          <Wrench className="size-6 text-f1-brand-ink" /> EDIT MODE • แก้ไขโจทย์
         </h1>
         {notice && (
           <p className="rounded-sm border border-f1-line bg-zinc-50 px-3 py-2 text-sm text-zinc-700">{notice}</p>
@@ -424,34 +564,95 @@ export function EditPage() {
               }
               className="border-[#8B8B95] bg-white text-f1-ink"
             />
-            {game.timeLimitSeconds <= 0 && (
-              <span className="block text-xs text-f1-mute">
-                ไม่จำกัดเวลาใช้ได้เฉพาะเปิดเกมตรง ๆ — บนจอ Station จะจำกัด 5 นาทีแทน
-              </span>
-            )}
+            <span className="block text-xs text-f1-mute">เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO</span>
+          </label>
+          <label className="space-y-1 text-sm text-zinc-700">
+            <span>เกณฑ์ผ่าน (% ของจำนวนข้อ ปัดขึ้น)</span>
+            <Input
+              type="number"
+              min={1}
+              max={100}
+              value={game.passPercent}
+              onChange={(e) =>
+                setGame({ ...game, passPercent: Math.min(100, Math.max(1, Math.round(Number(e.target.value) || 1))) })
+              }
+              className="border-[#8B8B95] bg-white text-f1-ink"
+            />
+            <span className="block text-xs text-f1-mute">
+              ตอนนี้ต้องตอบถูกอย่างน้อย{" "}
+              {Math.ceil((game.pairs.filter(isPairComplete).length * game.passPercent) / 100)} จาก{" "}
+              {game.pairs.filter(isPairComplete).length} ข้อ
+            </span>
           </label>
         </div>
 
-        <h2 className="f1-font-display text-sm font-bold text-f1-ink">คู่ที่ต้องจับคู่</h2>
+        <h2 className="f1-font-display text-sm font-bold text-f1-ink">
+          คำถาม ({game.pairs.filter(isPairComplete).length}/{game.pairs.length} ข้อพร้อมเล่น)
+        </h2>
 
-        {game.pairs.map((pair, idx) => (
-          <div key={pair.id} className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4">
-            <div className="flex items-center justify-between">
-              <span className="f1-font-display text-f1-ink">คู่ที่ {idx + 1}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-f1-brand hover:bg-f1-brand/10 hover:text-f1-brand-dark"
-                disabled={game.pairs.length <= MIN_PAIRS}
-                onClick={() => removePair(pair.id)}
-              >
-                ลบคู่นี้
-              </Button>
+        {game.pairs.map((pair, idx) => {
+          const problems = pairProblems(pair);
+          return (
+          <div
+            key={pair.id}
+            className={`space-y-3 rounded-sm border-2 bg-white/90 p-4 ${problems.length > 0 ? "border-f1-wrong" : "border-f1-line"}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="f1-font-display text-f1-ink">ข้อที่ {idx + 1}</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="เลื่อนขึ้น"
+                  className="text-f1-brand-ink hover:bg-f1-brand/10"
+                  disabled={idx === 0}
+                  onClick={() => movePair(pair.id, -1)}
+                >
+                  <ArrowUp />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="เลื่อนลง"
+                  className="text-f1-brand-ink hover:bg-f1-brand/10"
+                  disabled={idx === game.pairs.length - 1}
+                  onClick={() => movePair(pair.id, 1)}
+                >
+                  <ArrowDown />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-f1-brand-ink hover:bg-f1-brand/10 hover:text-f1-brand-ink"
+                  disabled={game.pairs.length <= MIN_PAIRS}
+                  onClick={() => removePair(pair.id)}
+                >
+                  ลบข้อนี้
+                </Button>
+              </div>
             </div>
+
+            {problems.length > 0 && (
+              <div className="rounded-sm border border-red-200 bg-f1-bad-bg px-3 py-2 text-sm text-f1-bad">
+                <p className="flex items-center gap-1.5 font-bold">
+                  <TriangleAlert className="size-4" /> ข้อนี้ยังไม่สมบูรณ์ — จะไม่ถูกนำไปเล่น
+                </p>
+                <ul className="ml-6 list-disc">
+                  {problems.map((m) => (
+                    <li key={m}>{m}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!pair.video && (
+              <p className="flex items-center gap-1.5 rounded-sm border border-f1-line bg-zinc-50 px-3 py-1.5 text-xs text-f1-mute">
+                <TriangleAlert className="size-3.5" /> ข้อนี้ยังไม่มี VDO (ไม่บังคับ)
+              </p>
+            )}
 
             <div className="grid gap-3 md:grid-cols-2">
               <SideFields
-                title="คำถาม (ซ้าย)"
+                title="คำถาม"
                 type={pair.promptType}
                 text={pair.promptText}
                 image={pair.promptImage}
@@ -463,21 +664,32 @@ export function EditPage() {
               <div className="space-y-2">
                 {pair.answers.map((answer, aIdx) => (
                   <div key={answer.id} className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="f1-font-mono text-xs text-f1-mute">คำตอบที่ {aIdx + 1}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="flex cursor-pointer items-center gap-2 text-xs">
+                        <input
+                          type="radio"
+                          name={`correct-${pair.id}`}
+                          checked={Boolean(answer.correct)}
+                          onChange={() => setCorrect(pair.id, answer.id)}
+                          className="size-4 accent-[#15803D]"
+                        />
+                        <span className={answer.correct ? "font-bold text-f1-ok-ink" : "text-f1-mute"}>
+                          {answer.correct ? "ตัวที่ถูก" : "ตั้งเป็นตัวที่ถูก"}
+                        </span>
+                      </label>
                       {pair.answers.length > MIN_ANSWERS && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 px-2 text-xs text-f1-brand hover:bg-f1-brand/10 hover:text-f1-brand-dark"
+                          className="h-6 px-2 text-xs text-f1-brand-ink hover:bg-f1-brand/10 hover:text-f1-brand-ink"
                           onClick={() => removeAnswer(pair.id, answer.id)}
                         >
-                          ลบคำตอบนี้
+                          ลบตัวเลือกนี้
                         </Button>
                       )}
                     </div>
                     <SideFields
-                      title={aIdx === 0 ? "คำตอบ (ขวา)" : `คำตอบ (ขวา) #${aIdx + 1}`}
+                      title={`ตัวเลือกที่ ${aIdx + 1}`}
                       type={answer.type}
                       text={answer.text}
                       image={answer.image}
@@ -491,22 +703,29 @@ export function EditPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-f1-brand bg-white text-f1-brand hover:bg-f1-brand/10"
+                  className="border-f1-brand bg-white text-f1-brand-ink hover:bg-f1-brand/10"
                   onClick={() => addAnswer(pair.id)}
                 >
-                  + เพิ่มคำตอบ
+                  + เพิ่มตัวเลือก
                 </Button>
               </div>
             </div>
+
+            <VideoField
+              video={pair.video}
+              onVideo={(v) => updatePair(pair.id, { video: v })}
+              onUpload={handleUploadVideo}
+            />
           </div>
-        ))}
+          );
+        })}
 
         <Button
           variant="outline"
-          className="border-f1-brand bg-white text-f1-brand hover:bg-f1-brand/10"
+          className="border-f1-brand bg-white text-f1-brand-ink hover:bg-f1-brand/10"
           onClick={addPair}
         >
-          + เพิ่มคู่จับคู่
+          + เพิ่มข้อ
         </Button>
 
         <div className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4">
@@ -544,7 +763,7 @@ export function EditPage() {
           </Button>
           <Button
             disabled={saving}
-            className="f1-font-display bg-f1-brand text-white hover:bg-f1-brand-dark"
+            className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
             onClick={handleSave}
           >
             อัปโหลดแล้วไปเล่น

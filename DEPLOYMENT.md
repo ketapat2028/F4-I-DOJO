@@ -36,8 +36,8 @@
 - ตอนเริ่มจะสร้างตาราง `records`, `app_config`, `game` และ `images` เองถ้ายังไม่มี
 - ชุดคำถามของเกมเก็บในตาราง `game` (แถวเดียว, JSON) ผ่าน `GET /api/game` (404 = ยังไม่มี) และ `PUT /api/game`
 - รูปที่อัปโหลดจากหน้า editor เก็บเป็น `LONGBLOB` ในตาราง `images` (ไม่เขียนไฟล์ลงดิสก์) — `POST /api/upload` (field `image`, `.jpg .jpeg .png .gif .webp` ไม่เกิน 10MB) คืน `{ id }` แล้ว question/answer เก็บ URL `/I-DOJO/api/images/<id>`, เปิดรูปผ่าน `GET /api/images/:id` (ไม่ต้องใช้รหัส) · ไฟล์ผิดชนิด/ใหญ่เกินได้ 400 JSON `{error}` ภาษาไทย · รูปอยู่ใน DB แล้ว **backup DB อย่างเดียวได้รูปครบ** แต่ DB จะโตตามจำนวนรูป และรูปที่เลิกใช้ไม่ถูกลบอัตโนมัติ
-- `PUT /api/game`, `POST /api/upload`, `GET /api/admin/check`, `POST`/`DELETE /api/records`, `POST /api/app-config` ต้องส่ง header `x-admin-secret` ตรงกับ `ADMIN_SECRET` — ผู้ดูแลกรอกรหัสนี้ในหน้า `/I-DOJO/editor` (ไม่ได้ฝังใน frontend) ถ้า `ADMIN_SECRET` ว่างจะบันทึกไม่ได้เลย
-- ไม่มีวิดีโอสอนแล้ว (ตัดออกทั้งฟีเจอร์)
+- VDO ของแต่ละข้อเก็บเป็น**ไฟล์**ใน `backend/videos/` (ใหญ่เกินจะเก็บใน DB) — `POST /api/upload-video` (field `video`, `.mp4 .m4v .webm .ogv` ไม่เกิน 300MB) คืน `{ filename }` แล้วข้อนั้นเก็บ URL `/I-DOJO/api/videos/<filename>` เสิร์ฟแบบ static (รองรับ Range) · **backup ต้องเอาโฟลเดอร์ `backend/videos/` ไปด้วย** · ถ้า Apache ตั้ง `LimitRequestBody` หรือ `ProxyTimeout` ไว้ต่ำ ต้องเพิ่มให้รับไฟล์ 300MB ได้ · ไฟล์ที่เลิกใช้ไม่ถูกลบอัตโนมัติ
+- `PUT /api/game`, `POST /api/upload`, `POST /api/upload-video`, `GET /api/admin/check`, `POST`/`DELETE /api/records`, `POST /api/app-config` ต้องส่ง header `x-admin-secret` ตรงกับ `ADMIN_SECRET` — ผู้ดูแลกรอกรหัสนี้ในหน้า `/I-DOJO/editor` (ไม่ได้ฝังใน frontend) ถ้า `ADMIN_SECRET` ว่างจะบันทึกไม่ได้เลย
 - Config อยู่ใน `backend/.env` (ไม่ commit, permission `600`, owner `idojo`)
 - ต้องมี `backend/.env.example` ที่ระบุ key ทุกตัวโดยไม่มีค่าจริง
 

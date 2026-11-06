@@ -26,6 +26,11 @@ app.use(express.json({ limit: '10mb' }));
 // รูปที่อัปโหลดใหม่เก็บใน DB (ตาราง images) แล้ว — เหลือเสิร์ฟโฟลเดอร์นี้ไว้เผื่อชุดคำถามเก่าที่ยังอ้างอิงไฟล์อยู่
 // อ้างจากที่อยู่ของไฟล์นี้ ไม่ขึ้นกับว่า PM2 start จากโฟลเดอร์ไหน
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
+// VDO ของแต่ละข้อ (ถึง 300MB) ใหญ่เกินจะเก็บใน DB — เขียนลงดิสก์ที่ backend/videos แล้วเสิร์ฟแบบ static
+// express.static รองรับ Range request ทำให้ <video> เลื่อน/โหลดทีละส่วนได้
+const VIDEO_DIR = path.join(__dirname, 'videos');
+fs.mkdirSync(VIDEO_DIR, { recursive: true });
+app.use('/api/videos', express.static(VIDEO_DIR, { maxAge: '365d', immutable: true }));
 
 // งานที่แก้ข้อมูล (บันทึกชุดคำถาม, อัปโหลดรูป, เขียน/ลบ records, app-config) ต้องส่ง header x-admin-secret ตรงกับ ADMIN_SECRET
 function requireAdmin(req, res, next) {
@@ -59,6 +64,32 @@ function uploadImageField(req, res, next) {
   upload.single('image')(req, res, (err) => {
     if (!err) return next();
     const message = err.code === 'LIMIT_FILE_SIZE' ? `ไฟล์ใหญ่เกิน ${IMAGE_MAX_MB}MB` : err.message;
+    res.status(400).json({ error: message });
+  });
+}
+
+const VIDEO_EXTS = ['.mp4', '.m4v', '.webm', '.ogv'];
+const VIDEO_MAX_MB = 300;
+const uploadVideo = multer({
+  storage: multer.diskStorage({
+    destination: VIDEO_DIR,
+    // ตั้งชื่อเอง ไม่ใช้ชื่อไฟล์จาก browser (กันชื่อซ้ำ/อักขระแปลก)
+    filename: (req, file, cb) => cb(null, crypto.randomUUID() + path.extname(file.originalname).toLowerCase()),
+  }),
+  limits: { fileSize: VIDEO_MAX_MB * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (VIDEO_EXTS.includes(path.extname(file.originalname).toLowerCase())) {
+      cb(null, true);
+    } else {
+      cb(new Error(`รองรับเฉพาะไฟล์ VDO ${VIDEO_EXTS.join(' ')} เท่านั้น`));
+    }
+  }
+});
+
+function uploadVideoField(req, res, next) {
+  uploadVideo.single('video')(req, res, (err) => {
+    if (!err) return next();
+    const message = err.code === 'LIMIT_FILE_SIZE' ? `ไฟล์ใหญ่เกิน ${VIDEO_MAX_MB}MB` : err.message;
     res.status(400).json({ error: message });
   });
 }
@@ -119,7 +150,7 @@ async function initDB() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
-  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, timeLimitSeconds, pairs: [SpecRecord] }
+  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, timeLimitSeconds, passPercent, pairs: [SpecRecord] }
   await query(`
     CREATE TABLE IF NOT EXISTS game (
       singleton  TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,
@@ -194,6 +225,12 @@ app.post('/api/upload', requireAdmin, uploadImageField, async (req, res) => {
   }
 });
 
+// requireAdmin มาก่อน multer — รหัสผิดจะไม่มีไฟล์ถูกเขียนลงดิสก์
+app.post('/api/upload-video', requireAdmin, uploadVideoField, (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no file' });
+  res.json({ filename: req.file.filename });
+});
+
 // ให้หน้า editor ตรวจรหัสผู้ดูแลก่อนเริ่มแก้
 app.get('/api/admin/check', requireAdmin, (req, res) => {
   res.json({ ok: true });
@@ -225,7 +262,7 @@ app.get('/api/game', async (req, res) => {
 });
 
 app.put('/api/game', requireAdmin, async (req, res) => {
-  const { name, timeLimitSeconds, pairs } = req.body || {};
+  const { name, timeLimitSeconds, passPercent, pairs } = req.body || {};
   if (!Array.isArray(pairs) || pairs.length < 2) {
     return res.status(400).json({ error: 'ต้องมีอย่างน้อย 2 คู่' });
   }
@@ -233,6 +270,8 @@ app.put('/api/game', requireAdmin, async (req, res) => {
     const json = JSON.stringify({
       name: typeof name === 'string' ? name : '',
       timeLimitSeconds: Number.isFinite(timeLimitSeconds) ? Math.max(0, timeLimitSeconds) : 0,
+      // เกณฑ์ผ่าน (% ของจำนวนข้อ) — ไม่ส่งมา frontend ใช้ค่าเริ่มต้น 70
+      ...(Number.isFinite(passPercent) ? { passPercent: Math.min(100, Math.max(1, Math.round(passPercent))) } : {}),
       pairs,
     });
     await query(
