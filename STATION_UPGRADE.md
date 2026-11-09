@@ -128,7 +128,7 @@ const PORTAL_BOTTOM_GAP = "pb-[96px]"; // ใช้กับ root ของห�
 | คะแนนเพิ่ม | `.f1-bump` + `key={score}` | ตัวเลข "ถูก N" |
 | จุดความคืบหน้า | `.f1-dot` (transition width/สี) · ข้อที่เพิ่งถูก `.f1-dot-pop` · ข้อปัจจุบันกว้างขึ้น | แถบจุด |
 | สรุปผล | `.f1-modal-pop` กล่อง · `.f1-stamp` ตรา PASS/FAIL · `.f1-rise-in` + delay ไล่ทีละแถว | modal |
-| VDO โผล่ | `.f1-fade-in` | กล่อง VDO |
+| VDO ของข้อ เปิดเต็มจอ | `.f1-fade-in` พื้นดำ + `.f1-pop-in-spring` กล่อง VDO | modal `fixed inset-0 z-50` (ไม่อยู่ในการ์ดคำถาม) แถบบน "ข้อ N / M + โจทย์" · ฝังใน portal ใช้ `PORTAL_BOTTOM_GAP` แทน padding ล่าง (อย่าใส่ `lg:p-*` ทับ ไม่งั้น `pb-[96px]` โดนแทน) · `videoDone` แล้ว modal หาย ตัวเลือกเด้งขึ้น |
 
 **กฎที่ต้องทำตาม (เจอปัญหามาแล้ว):**
 - แอนิเมชันตอนเข้า (pop-in, q-enter, option-in, icon-pop, stamp, rise-in, fade-in) ใช้ fill-mode **`backwards`** ไม่ใช่ `both` — `both` ค้าง `transform` หลังจบ ทำให้ `:active` กดยุบและ jelly/wobble ไม่ทำงาน

@@ -171,7 +171,7 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
   }, []);
 
   return (
-    <div className="f1-fade-in relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
+    <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-black">
       <video
         ref={ref}
         src={src}
@@ -617,26 +617,13 @@ export function PlayPage() {
             <section
               key={`${roundId}:${index}`}
               className={cn(
-                "f1-q-enter flex min-h-0 flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4 lg:gap-3 lg:rounded-3xl lg:border-2 lg:p-6",
-                // ระหว่าง VDO ให้ VDO กินพื้นที่เกือบทั้งหมด · จบแล้วแบ่งที่ให้ตัวเลือก
-                videoDone ? "flex-[3]" : "flex-[5]",
+                "f1-q-enter flex min-h-0 flex-[3] flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4 lg:gap-3 lg:rounded-3xl lg:border-2 lg:p-6",
               )}
             >
               <p className="f1-font-mono shrink-0 text-xs font-bold tracking-widest text-f1-brand-ink sm:text-base lg:text-xl">
                 ข้อ {index + 1} / {total}
               </p>
-              {current.pair.video && !videoDone ? (
-                <>
-                  {current.pair.promptText.trim() && (
-                    <p className="f1-font-display shrink-0 text-center text-lg font-bold text-f1-ink sm:text-2xl lg:text-4xl">
-                      {current.pair.promptText}
-                    </p>
-                  )}
-                  <QuestionVideo key={`${roundId}:${index}:${replayN}`} src={current.pair.video} onDone={() => setVideoDone(true)} />
-                </>
-              ) : (
-                renderPrompt(current.pair)
-              )}
+              {renderPrompt(current.pair)}
             </section>
 
             {videoDone && (
@@ -652,6 +639,31 @@ export function PlayPage() {
           </>
         )}
       </main>
+
+      {/* VDO ของข้อ: หน้าต่างเต็มจอตรงกลาง ดูจบแล้วปิดเอง แล้วตัวเลือกเด้งขึ้น
+          ฝังใน portal → เว้นขอบล่างให้ปุ่มของ portal ไม่ทับภาพ */}
+      {phase === "playing" && current?.pair.video && !videoDone && (
+        <div
+          className={cn("f1-fade-in fixed inset-0 z-50 flex flex-col gap-2 bg-black px-2 pt-2 lg:gap-4 lg:px-4 lg:pt-4",
+            embedded ? PORTAL_BOTTOM_GAP : "pb-2 lg:pb-4",
+          )}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`VDO ข้อ ${index + 1}`}
+        >
+          <div className="f1-font-display flex shrink-0 items-baseline justify-center gap-3 px-2 text-center text-white lg:gap-5">
+            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand sm:text-lg lg:text-2xl">
+              ข้อ {index + 1} / {total}
+            </span>
+            {current.pair.promptText.trim() && (
+              <span className="line-clamp-2 text-lg font-bold sm:text-2xl lg:text-4xl">{current.pair.promptText}</span>
+            )}
+          </div>
+          <div className="f1-pop-in-spring flex min-h-0 flex-1 overflow-hidden rounded-lg lg:rounded-2xl">
+            <QuestionVideo key={`${roundId}:${index}:${replayN}`} src={current.pair.video} onDone={() => setVideoDone(true)} />
+          </div>
+        </div>
+      )}
 
       {/* โหลด VDO ข้อถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ข้อเดียว) — ถึงข้อนั้นเริ่มเล่นทันที ไม่ต้องรอบัฟเฟอร์
           ทำเฉพาะตอน VDO ข้อนี้จบแล้ว จะได้ไม่แย่งตัวถอดรหัส/เน็ตกับ VDO ที่กำลังเล่น */}
