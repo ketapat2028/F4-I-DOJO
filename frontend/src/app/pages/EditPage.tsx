@@ -26,6 +26,8 @@ import {
   VIDEO_MAX_MB,
   verifyAdmin,
 } from "../utils/gameStore";
+import { inspectVideo } from "../utils/videoCheck";
+import { canConvertVideo, ConvertCanceled, convertForPi, convertUnavailableReason, formatMB } from "../utils/videoConvert";
 
 const MIN_PAIRS = 2;
 const MIN_ANSWERS = 2;
@@ -176,16 +178,90 @@ interface VideoFieldProps {
   onUpload: (file: File, onProgress: (percent: number) => void) => Promise<string | undefined>;
 }
 
+// ไฟล์ต้นฉบับที่จะแปลงในเครื่องรับได้ใหญ่กว่าเพดานอัปโหลด (แปลงแล้วไฟล์เล็กลง) — ที่อัปโหลดจริงยังต้องไม่เกิน VIDEO_MAX_MB
+const SOURCE_MAX_MB = 2048;
+// นอกจากชนิดที่อัปโหลดได้ตรง ๆ รับ .mov .mkv มาแปลงเป็น MP4 ก่อนได้
+const SOURCE_EXTS = [...VIDEO_EXTS, ".mov", ".mkv"];
+
+type VideoStep = "checking" | "converting" | "uploading";
+
+// เลือก VDO → ตรวจว่าเล่นลื่นบนจอ Station (Pi 4) ไหม → ไม่ลื่นก็แปลงในเครื่องนี้ก่อน (videoConvert.ts) → อัปโหลด
 function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [percent, setPercent] = useState<number | null>(null);
-  async function handleFile(file: File | null) {
-    if (!file) return;
+  const [step, setStep] = useState<VideoStep | null>(null);
+  const [percent, setPercent] = useState(0);
+  // ปัญหาที่เจอในไฟล์ต้นฉบับ (แสดงเมื่อแปลงไม่ได้)
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [convertError, setConvertError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // ไฟล์ต้นฉบับที่แปลงไม่สำเร็จ — ให้กด "อัปโหลดไฟล์เดิมไปก่อน" ได้
+  const [fallbackFile, setFallbackFile] = useState<File | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const busy = step !== null;
+
+  function reset() {
+    setWarnings([]);
+    setConvertError(null);
+    setNote(null);
+    setFallbackFile(null);
+  }
+
+  async function upload(file: File) {
+    setStep("uploading");
     setPercent(0);
     const url = await onUpload(file, setPercent);
-    setPercent(null);
+    setStep(null);
     if (url) onVideo(url);
+    return Boolean(url);
   }
+
+  async function handleFile(file: File | null) {
+    if (!file) return;
+    reset();
+    if (file.size > SOURCE_MAX_MB * 1024 * 1024) {
+      setConvertError(`ไฟล์ใหญ่เกิน ${SOURCE_MAX_MB / 1024}GB`);
+      return;
+    }
+    setStep("checking");
+    const found = await inspectVideo(file).catch(() => [] as string[]);
+    const tooBig = file.size > VIDEO_MAX_MB * 1024 * 1024;
+    const uploadable = VIDEO_EXTS.some((ext) => file.name.toLowerCase().endsWith(ext));
+    // ไฟล์ดีอยู่แล้ว อัปโหลดเลย
+    if (found.length === 0 && !tooBig && uploadable) {
+      await upload(file);
+      return;
+    }
+    if (tooBig) found.push(`ไฟล์ใหญ่ ${formatMB(file.size)} เกินที่อัปโหลดได้ (${VIDEO_MAX_MB}MB)`);
+    setWarnings(found);
+    if (!canConvertVideo()) {
+      setStep(null);
+      setConvertError(convertUnavailableReason());
+      if (!tooBig && uploadable) setFallbackFile(file);
+      return;
+    }
+    setStep("converting");
+    setPercent(0);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const res = await convertForPi(file, { onProgress: setPercent, signal: ctrl.signal });
+      abortRef.current = null;
+      if (await upload(res.file)) {
+        setWarnings([]);
+        setNote(
+          res.reencoded
+            ? `แปลงให้เล่นลื่นบนจอ Station แล้ว: ${res.from.width}×${res.from.height} ${formatMB(res.from.size)} → ${res.to.width}×${res.to.height} ${formatMB(res.to.size)}`
+            : `จัดไฟล์ให้เริ่มเล่นได้ทันทีแล้ว (ภาพเดิม ไม่ลดคุณภาพ) ${formatMB(res.to.size)}`,
+        );
+      }
+    } catch (e) {
+      abortRef.current = null;
+      setStep(null);
+      setConvertError(e instanceof ConvertCanceled ? "ยกเลิกการแปลงแล้ว" : e instanceof Error ? e.message : "แปลง VDO ไม่สำเร็จ");
+      if (!tooBig && uploadable) setFallbackFile(file);
+    }
+  }
+
   return (
     <div className="space-y-2 rounded-sm border border-f1-line bg-zinc-50 p-3 text-sm text-zinc-700">
       <p className="f1-font-display flex items-center gap-1.5 font-bold text-f1-ink">
@@ -202,9 +278,9 @@ function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
         <input
           ref={fileRef}
           type="file"
-          accept={VIDEO_EXTS.join(",")}
+          accept={SOURCE_EXTS.join(",")}
           className="hidden"
-          disabled={percent !== null}
+          disabled={busy}
           onChange={(e) => {
             handleFile(e.target.files?.[0] ?? null);
             e.target.value = "";
@@ -213,33 +289,90 @@ function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
         <Button
           type="button"
           size="sm"
-          disabled={percent !== null}
+          disabled={busy}
           className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
           onClick={() => fileRef.current?.click()}
         >
           <FolderOpen /> เลือก VDO จากเครื่อง
         </Button>
-        {video && percent === null && (
+        {video && !busy && (
           <Button
             variant="ghost"
             size="sm"
             className="text-f1-brand-ink hover:bg-f1-brand/10 hover:text-f1-brand-ink"
-            onClick={() => onVideo(undefined)}
+            onClick={() => {
+              reset();
+              onVideo(undefined);
+            }}
           >
             ลบ VDO
           </Button>
         )}
       </div>
-      {percent !== null ? (
+
+      {(warnings.length > 0 || convertError) && !busy && (
+        <div className="space-y-1 rounded-sm border border-f1-wrong/40 bg-f1-bad-bg p-2 text-xs text-f1-bad">
+          {warnings.length > 0 && (
+            <>
+              <p className="font-bold">VDO นี้อาจกระตุกบนจอ Station (Raspberry Pi 4):</p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {convertError && <p className="font-bold">{convertError}</p>}
+          <p>
+            แปลงเองได้ที่หน้า{" "}
+            <a className="underline" href={`${import.meta.env.BASE_URL}convert`} target="_blank" rel="noreferrer">
+              แปลง VDO
+            </a>{" "}
+            หรือลากไฟล์ไปวางบน <code>tools/convert-video.bat</code> (ดู VIDEO_GUIDE.md)
+          </p>
+          {fallbackFile && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-1 border-f1-wrong/50 bg-white text-f1-bad hover:bg-white"
+              onClick={() => {
+                const f = fallbackFile;
+                reset();
+                void upload(f);
+              }}
+            >
+              อัปโหลดไฟล์เดิมไปก่อน
+            </Button>
+          )}
+        </div>
+      )}
+      {note && !busy && <p className="rounded-sm bg-f1-ok-bg p-2 text-xs text-f1-ok-ink">✓ {note}</p>}
+
+      {busy ? (
         <div className="space-y-1">
           <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200">
-            <div className="h-full bg-f1-brand transition-all" style={{ width: `${percent}%` }} />
+            <div
+              className="h-full w-full origin-left bg-f1-brand transition-transform"
+              style={{ transform: `scaleX(${step === "checking" ? 0 : percent / 100})` }}
+            />
           </div>
-          <p className="f1-font-mono text-xs text-f1-mute">กำลังอัปโหลด {percent}%</p>
+          <div className="flex items-center gap-3">
+            <p className="f1-font-mono text-xs text-f1-mute">
+              {step === "checking" && "กำลังตรวจไฟล์…"}
+              {step === "converting" && `กำลังแปลงให้เล่นลื่นบนจอ Station ${percent}% (ทำในเครื่องนี้ อย่าปิดหน้า)`}
+              {step === "uploading" && `กำลังอัปโหลด ${percent}%`}
+            </p>
+            {step === "converting" && (
+              <Button variant="ghost" size="sm" className="h-6 text-xs text-f1-mute" onClick={() => abortRef.current?.abort()}>
+                ยกเลิก
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <p className="text-xs text-f1-mute">
-          {VIDEO_EXTS.join(" ")} ไม่เกิน {VIDEO_MAX_MB}MB
+          เลือกไฟล์ VDO ได้เลย ({SOURCE_EXTS.join(" ")}) — ถ้าไฟล์ใหญ่/ไม่ใช่ H.264 ระบบจะแปลงให้เล่นลื่นบนจอ Station ก่อนอัปโหลดเอง ·
+          อัปโหลดได้ไม่เกิน {VIDEO_MAX_MB}MB
         </p>
       )}
     </div>

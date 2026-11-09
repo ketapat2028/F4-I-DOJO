@@ -19,6 +19,9 @@ export function F1Header() {
           <Link to="/editor" className="hover:text-white">
             แก้ไขโจทย์
           </Link>
+          <Link to="/convert" className="hover:text-white">
+            แปลง VDO
+          </Link>
         </nav>
       </div>
     </header>

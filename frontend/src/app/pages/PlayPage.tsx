@@ -109,6 +109,11 @@ function RaceClock({ remaining, elapsed, limit, running }: { remaining: number |
   );
 }
 
+// ระหว่าง VDO กำลังเล่น หยุดแอนิเมชันที่วนไม่หยุด (html.f1-video-playing ใน f1.css) ให้ Pi ถอดรหัส VDO ได้เต็มที่
+function setVideoPlaying(on: boolean) {
+  document.documentElement.classList.toggle("f1-video-playing", on);
+}
+
 // VDO ของข้อ: เล่นอัตโนมัติ ไม่มีปุ่มควบคุม (ข้ามไม่ได้) · จบ/โหลดไม่ได้/ค้าง → onDone ครั้งเดียว
 // browser บล็อกเล่นอัตโนมัติ → แสดงปุ่มให้แตะเล่น
 function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
@@ -139,6 +144,9 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
       if (e instanceof DOMException && e.name === "NotAllowedError") setBlockedBoth(true);
     });
   }
+
+  // VDO หยุด/จบ/ถูกถอดออก → เอา class ออก แอนิเมชันที่วนไม่หยุดกลับมาเล่นต่อ
+  useEffect(() => () => setVideoPlaying(false), []);
 
   useEffect(() => {
     tryPlay();
@@ -172,6 +180,8 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
         disablePictureInPicture
         controlsList="nodownload noplaybackrate noremoteplayback"
         onContextMenu={(e) => e.preventDefault()}
+        onPlaying={() => setVideoPlaying(true)}
+        onPause={() => setVideoPlaying(false)}
         onEnded={finish}
         onError={finish}
         className="h-full max-h-full w-full object-contain"
@@ -241,10 +251,13 @@ export function PlayPage() {
   portalStatusRef.current = portalStatus;
 
   // ขยายทั้งหน้าตามขนาดจอ (html.f1-play-scale ใน f1.css) — เฉพาะหน้าเกม หน้า editor คงขนาดเดิม
+  // ?lite=1 = โหมดเบาสำหรับจอที่เครื่องไม่แรง (ตั้งใน URL กิจกรรมที่หน้า Admin ของ portal) — ดู VIDEO_GUIDE.md
   useEffect(() => {
     const root = document.documentElement;
+    const lite = new URLSearchParams(window.location.search).get("lite") === "1";
     root.classList.add("f1-play-scale");
-    return () => root.classList.remove("f1-play-scale");
+    if (lite) root.classList.add("f1-lite");
+    return () => root.classList.remove("f1-play-scale", "f1-lite", "f1-video-playing");
   }, []);
 
   useEffect(() => {
@@ -520,12 +533,13 @@ export function PlayPage() {
       {/* แถบเวลาบาง ๆ ใต้ header */}
       <div className="h-[3px] w-full shrink-0 bg-zinc-200 lg:h-1.5">
         {remaining !== null && (
+          // ย่อด้วย transform (ไม่ต้องคำนวณ layout ใหม่ทุกวินาที — เบากว่าบน Pi)
           <div
             className={cn(
-              "h-full transition-[width,background-color] duration-1000 ease-linear",
+              "h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear",
               lowTime && clockRunning ? "f1-timer-blink bg-f1-wrong" : "bg-f1-brand",
             )}
-            style={{ width: `${(remaining / limit) * 100}%` }}
+            style={{ transform: `scaleX(${remaining / limit})` }}
           />
         )}
       </div>
@@ -638,6 +652,12 @@ export function PlayPage() {
           </>
         )}
       </main>
+
+      {/* โหลด VDO ข้อถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ข้อเดียว) — ถึงข้อนั้นเริ่มเล่นทันที ไม่ต้องรอบัฟเฟอร์
+          ทำเฉพาะตอน VDO ข้อนี้จบแล้ว จะได้ไม่แย่งตัวถอดรหัส/เน็ตกับ VDO ที่กำลังเล่น */}
+      {phase === "playing" && videoDone && rounds[index + 1]?.pair.video && (
+        <video key={rounds[index + 1].pair.video} src={rounds[index + 1].pair.video} preload="auto" muted playsInline className="hidden" aria-hidden />
+      )}
 
       {flash && (
         <div

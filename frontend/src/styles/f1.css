@@ -200,8 +200,7 @@ html.f1-play-scale {
 .f1-dot {
   transition:
     width 0.45s var(--f1-spring),
-    background-color 0.3s ease,
-    box-shadow 0.3s ease;
+    background-color 0.3s ease;
 }
 @keyframes f1-dot-pop {
   0% { transform: scaleY(1); }
@@ -257,7 +256,9 @@ html.f1-play-scale {
   20% { opacity: 0.9; }
   100% { opacity: 0; }
 }
+/* แฟลชเต็มจอ: แยก layer บน GPU แล้วเปลี่ยนแค่ opacity */
 .f1-checkered-flash {
+  will-change: opacity;
   animation: f1-checkered-flash 0.6s ease-out forwards;
   background-image: repeating-conic-gradient(#fff 0% 25%, #111 0% 50%);
   background-size: 16px 16px;
@@ -269,6 +270,7 @@ html.f1-play-scale {
   100% { opacity: 0; }
 }
 .f1-redflag-flash {
+  will-change: opacity;
   animation: f1-redflag-flash 0.6s ease-out forwards;
   background-color: #dc0000;
 }
@@ -292,12 +294,30 @@ html.f1-play-scale {
   animation: f1-speedlines 0.3s linear infinite;
 }
 
-@keyframes f1-pulse-glow {
-  0%, 100% { box-shadow: 0 0 8px 2px rgba(245, 196, 0, 0.6); transform: scale(1); }
-  50% { box-shadow: 0 0 24px 8px rgba(245, 196, 0, 0.95); transform: scale(1.05); }
+/* เรืองแสงเต้น: เงาวาดครั้งเดียวใน ::after แล้วเต้นด้วย opacity/transform เท่านั้น
+   (animate box-shadow ตรง ๆ = วาดใหม่ทุกเฟรม Pi 4 ไม่ไหว) */
+@keyframes f1-pulse-scale {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+@keyframes f1-pulse-opacity {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 .f1-glow {
-  animation: f1-pulse-glow 1.2s ease-in-out infinite;
+  position: relative;
+  animation: f1-pulse-scale 1.2s ease-in-out infinite;
+  will-change: transform;
+}
+.f1-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 1.5rem 0.5rem rgba(245, 196, 0, 0.95);
+  pointer-events: none;
+  animation: f1-pulse-opacity 1.2s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @keyframes f1-confetti-fall {
@@ -312,6 +332,7 @@ html.f1-play-scale {
   animation-name: f1-confetti-fall;
   animation-timing-function: linear;
   animation-fill-mode: both;
+  will-change: transform;
 }
 
 @keyframes f1-slot-blink {
@@ -406,11 +427,23 @@ html.f1-play-scale {
 
 /* นาฬิกาเหลือ ≤ 10 วิ: กรอบเต้นเป็นจังหวะสีแดง */
 @keyframes f1-clock-pulse {
-  0%, 100% { box-shadow: 0 0 10px 2px rgba(220, 0, 0, 0.5); transform: scale(1); }
-  50% { box-shadow: 0 0 28px 8px rgba(220, 0, 0, 0.85); transform: scale(1.04); }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
 }
 .f1-clock-pulse {
+  position: relative;
   animation: f1-clock-pulse 0.8s ease-in-out infinite;
+  will-change: transform;
+}
+.f1-clock-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 1.75rem 0.5rem rgba(220, 0, 0, 0.85);
+  pointer-events: none;
+  animation: f1-pulse-opacity 0.8s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -471,4 +504,47 @@ html.f1-play-scale {
   .f1-confetti-piece {
     display: none;
   }
+  .f1-glow::after,
+  .f1-clock-pulse::after {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ระหว่าง VDO กำลังเล่น (PlayPage ใส่ html.f1-video-playing): หยุดแอนิเมชันที่วนไม่หยุด
+   ให้ CPU/GPU ของ Pi 4 เหลือไว้ถอดรหัส VDO เต็มที่ */
+html.f1-video-playing .f1-glow,
+html.f1-video-playing .f1-glow::after,
+html.f1-video-playing .f1-timer-blink,
+html.f1-video-playing .f1-clock-pulse,
+html.f1-video-playing .f1-clock-pulse::after {
+  animation-play-state: paused;
+}
+
+/* โหมดเบา ?lite=1 (html.f1-lite) — เผื่อจอ Station ยังกระตุก: เหลือแค่จางเข้าสั้น ๆ
+   ไม่มีแฟลชเต็มจอ, confetti, เรืองแสง, เยลลี่/สั่น (ผลถูก/ผิดยังเห็นจากสีและไอคอน) */
+html.f1-lite .f1-pop-in-spring,
+html.f1-lite .f1-q-enter,
+html.f1-lite .f1-option-in,
+html.f1-lite .f1-rise-in,
+html.f1-lite .f1-stamp,
+html.f1-lite .f1-modal-pop {
+  animation: f1-fade-in 0.2s ease-out backwards;
+}
+html.f1-lite .f1-jelly,
+html.f1-lite .f1-wobble,
+html.f1-lite .f1-icon-pop,
+html.f1-lite .f1-bump,
+html.f1-lite .f1-dot-pop,
+html.f1-lite .f1-glow,
+html.f1-lite .f1-clock-pulse,
+html.f1-lite .f1-timer-blink,
+html.f1-lite .f1-glow::after,
+html.f1-lite .f1-clock-pulse::after {
+  animation: none;
+}
+html.f1-lite .f1-checkered-flash,
+html.f1-lite .f1-redflag-flash,
+html.f1-lite .f1-confetti-piece {
+  display: none;
 }
