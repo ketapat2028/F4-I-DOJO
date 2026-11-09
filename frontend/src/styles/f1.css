@@ -81,12 +81,165 @@
   font-family: "JetBrains Mono", monospace;
 }
 
+/* หน้าเกม (PlayPage ใส่ class นี้ที่ <html>): ขยายทั้งหน้าตามจอ เพราะ Tailwind ใช้ rem ทั้งหมด
+   1280×720 ≈ 16px · 1920×1080 ≈ 24px · 4K ≈ 48px — อ่านได้จากระยะ 2–3 ม. บนทีวี 55"
+   เอาค่าที่เล็กกว่าระหว่าง vw กับ vh จะได้ไม่ล้นจอทั้งแนวกว้างและแนวสูง (ใน iframe = ขนาด iframe) */
+html.f1-play-scale {
+  font-size: clamp(14px, min(1.25vw, 2.22vh), 48px);
+}
+
+/* spring curve เดียวกันทั้งเกม — เลยเป้านิดนึงแล้วเด้งกลับ */
+:root {
+  --f1-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --f1-spring-soft: cubic-bezier(0.22, 1.25, 0.4, 1);
+}
+
+/* ปุ่ม/การ์ดที่กดได้: กดยุบ ปล่อยเด้งคืน */
+.f1-press {
+  transition:
+    transform 0.35s var(--f1-spring),
+    translate 0.35s var(--f1-spring),
+    box-shadow 0.25s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    opacity 0.3s ease;
+}
+.f1-press:not(:disabled):active {
+  transform: scale(0.94);
+  transition-duration: 0.08s;
+}
+
 @keyframes f1-blink {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  50% { opacity: 0.35; }
 }
 .f1-timer-blink {
-  animation: f1-blink 0.8s step-start infinite;
+  animation: f1-blink 0.9s ease-in-out infinite;
+}
+
+/* การ์ด/กล่องเด้งเข้า */
+@keyframes f1-pop-in-spring {
+  0% { opacity: 0; transform: scale(0.8) translateY(1.5rem); }
+  60% { opacity: 1; transform: scale(1.04) translateY(-0.25rem); }
+  80% { transform: scale(0.98) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.f1-pop-in-spring {
+  animation: f1-pop-in-spring 0.6s var(--f1-spring-soft) backwards;
+}
+
+/* เปลี่ยนข้อ: การ์ดคำถามเลื่อนเข้าจากขวาแล้วเด้ง */
+@keyframes f1-q-enter {
+  0% { opacity: 0; transform: translateX(12%) scale(0.92) rotate(1.5deg); }
+  60% { opacity: 1; transform: translateX(-1.5%) scale(1.02) rotate(-0.5deg); }
+  100% { opacity: 1; transform: translateX(0) scale(1) rotate(0); }
+}
+.f1-q-enter {
+  animation: f1-q-enter 0.6s var(--f1-spring-soft) backwards;
+}
+
+/* ตัวเลือกโผล่ทีละใบ (หน่วงด้วย animation-delay จาก PlayPage) */
+@keyframes f1-option-in {
+  0% { opacity: 0; transform: translateY(2rem) scale(0.85); }
+  65% { opacity: 1; transform: translateY(-0.35rem) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.f1-option-in {
+  animation: f1-option-in 0.55s var(--f1-spring-soft) backwards;
+}
+
+/* ตอบถูก: เด้งแบบเยลลี่ */
+@keyframes f1-jelly {
+  0% { transform: scale(1, 1); }
+  25% { transform: scale(1.12, 0.9); }
+  40% { transform: scale(0.92, 1.1); }
+  55% { transform: scale(1.06, 0.96); }
+  70% { transform: scale(0.98, 1.03); }
+  100% { transform: scale(1, 1); }
+}
+.f1-jelly {
+  animation: f1-jelly 0.65s ease-out;
+}
+
+/* ตอบผิด: สั่นแรง + เอียงนิด ๆ */
+@keyframes f1-wobble {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  15% { transform: translateX(-6%) rotate(-3deg); }
+  30% { transform: translateX(5%) rotate(2.5deg); }
+  45% { transform: translateX(-4%) rotate(-2deg); }
+  60% { transform: translateX(3%) rotate(1deg); }
+  75% { transform: translateX(-1.5%) rotate(-0.5deg); }
+}
+.f1-wobble {
+  animation: f1-wobble 0.5s ease-out;
+}
+
+/* ไอคอน ✓/✗ หมุนเด้งเข้า */
+@keyframes f1-icon-pop {
+  0% { transform: scale(0) rotate(-120deg); }
+  70% { transform: scale(1.25) rotate(10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.f1-icon-pop {
+  animation: f1-icon-pop 0.45s var(--f1-spring) backwards;
+}
+
+/* ตัวเลขคะแนนเพิ่ม: เด้ง */
+@keyframes f1-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.6); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+.f1-bump {
+  display: inline-block;
+  animation: f1-bump 0.5s var(--f1-spring);
+}
+
+/* จุดความคืบหน้า: เปลี่ยนสี/ความกว้างนุ่ม ๆ · ข้อที่เพิ่งถูกเด้ง */
+.f1-dot {
+  transition:
+    width 0.45s var(--f1-spring),
+    background-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+@keyframes f1-dot-pop {
+  0% { transform: scaleY(1); }
+  40% { transform: scale(1.3, 1.8); }
+  100% { transform: scale(1); }
+}
+.f1-dot-pop {
+  animation: f1-dot-pop 0.45s var(--f1-spring);
+}
+
+/* ตรา PASS/FAIL ปั๊มลงมา */
+@keyframes f1-stamp {
+  0% { opacity: 0; transform: scale(2.4) rotate(-12deg); }
+  55% { opacity: 1; transform: scale(0.88) rotate(2deg); }
+  75% { transform: scale(1.06) rotate(-1deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+.f1-stamp {
+  display: inline-block;
+  animation: f1-stamp 0.7s var(--f1-spring-soft) 0.15s backwards;
+}
+
+/* แถวในกล่องสรุปผลไล่โผล่ทีละแถว (หน่วงด้วย animation-delay) */
+@keyframes f1-rise-in {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.f1-rise-in {
+  animation: f1-rise-in 0.4s var(--f1-spring-soft) backwards;
+}
+
+/* VDO จางเข้า */
+@keyframes f1-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.f1-fade-in {
+  animation: f1-fade-in 0.4s ease-out backwards;
 }
 
 @keyframes f1-bounce-correct {
@@ -197,7 +350,7 @@
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .f1-modal-pop {
-  animation: f1-modal-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: f1-modal-pop 0.45s var(--f1-spring);
 }
 @media (prefers-reduced-motion: reduce) {
   .f1-backdrop-fade,
@@ -292,8 +445,26 @@
   .f1-correct-bounce,
   .f1-shake,
   .f1-timer-blink,
-  .f1-glow {
+  .f1-glow,
+  .f1-pop-in-spring,
+  .f1-q-enter,
+  .f1-option-in,
+  .f1-jelly,
+  .f1-wobble,
+  .f1-icon-pop,
+  .f1-bump,
+  .f1-dot-pop,
+  .f1-stamp,
+  .f1-rise-in,
+  .f1-fade-in {
     animation: none;
+  }
+  .f1-press,
+  .f1-dot {
+    transition: none;
+  }
+  .f1-press:not(:disabled):active {
+    transform: none;
   }
   .f1-checkered-flash,
   .f1-redflag-flash,

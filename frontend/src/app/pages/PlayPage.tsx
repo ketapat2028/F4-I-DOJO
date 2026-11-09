@@ -27,6 +27,8 @@ const LOW_TIME_S = 30;
 // VDO ไม่ขยับเลยนานเท่านี้ (โหลดไม่ขึ้น/ค้างกลางทาง) = ข้ามไปแสดงตัวเลือก ไม่ให้เกมค้าง
 const VIDEO_STALL_S = 15;
 const LETTERS = "ABCDEFGHIJ";
+// ตอนถูกฝัง: เว้นขอบล่างให้ปุ่ม "ENTER / SPACEBAR · ผ่านสถานี" ของ portal (~90px, STATION_ACTIVITY.md ข้อ 5)
+const PORTAL_BOTTOM_GAP = "pb-[96px]";
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -52,8 +54,8 @@ function GameTitle({ name }: { name: string }) {
   // "I-DOJO - PIT 4 5S" → ส่วนหลัง " - " เป็นสีแบรนด์
   const m = name.match(/^(.*?\S)\s+-\s+(.+)$/);
   return (
-    <h1 className="f1-font-display truncate text-lg font-bold leading-tight text-f1-ink sm:text-2xl">
-      <Flag className="mr-2 inline size-5 align-[-0.1em] text-f1-brand-ink sm:size-6" />
+    <h1 className="f1-font-display truncate text-lg font-bold leading-tight text-f1-ink sm:text-2xl lg:text-3xl">
+      <Flag className="mr-2 inline size-5 align-[-0.1em] text-f1-brand-ink sm:size-6 lg:size-8" />
       {m ? `${m[1]} - ` : name}
       {m && <span className="text-f1-brand-ink">{m[2]}</span>}
     </h1>
@@ -70,7 +72,7 @@ function RaceClock({ remaining, elapsed, limit, running }: { remaining: number |
   return (
     <div
       className={cn(
-        "flex h-11 shrink-0 items-center gap-2 rounded-full border-2 pl-1.5 pr-4 shadow-md transition-colors duration-500 sm:h-14 sm:gap-3 sm:pr-5",
+        "flex h-11 shrink-0 items-center gap-2 rounded-full border-2 pl-1.5 pr-4 shadow-md transition-colors duration-500 sm:h-14 sm:gap-3 sm:pr-5 lg:h-16 lg:pr-6",
         low && running ? "border-f1-wrong shadow-[0_0_24px_rgba(220,0,0,0.6)]" : "border-f1-brand",
         critical && running && "f1-clock-pulse",
       )}
@@ -78,7 +80,7 @@ function RaceClock({ remaining, elapsed, limit, running }: { remaining: number |
       role="timer"
       aria-label={remaining !== null ? "เวลาที่เหลือ" : "เวลาที่ใช้"}
     >
-      <svg viewBox="0 0 36 36" className="size-8 shrink-0 -rotate-90 sm:size-11">
+      <svg viewBox="0 0 36 36" className="size-8 shrink-0 -rotate-90 sm:size-11 lg:size-13">
         <circle cx="18" cy="18" r={R} fill="none" strokeWidth="4" className="stroke-white/15" />
         <circle
           cx="18"
@@ -161,7 +163,7 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
   }, []);
 
   return (
-    <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
+    <div className="f1-fade-in relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-xl bg-black">
       <video
         ref={ref}
         src={src}
@@ -178,15 +180,15 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
         <button
           type="button"
           onClick={tryPlay}
-          className="f1-font-display absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-lg font-bold text-white"
+          className="f1-font-display f1-press absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-lg font-bold text-white lg:text-3xl"
         >
-          <span className="flex size-16 items-center justify-center rounded-full bg-f1-brand text-f1-ink shadow-lg">
-            <Play className="size-8 translate-x-0.5" fill="currentColor" />
+          <span className="f1-glow flex size-16 items-center justify-center rounded-full bg-f1-brand text-f1-ink shadow-lg lg:size-24">
+            <Play className="size-8 translate-x-0.5 lg:size-12" fill="currentColor" />
           </span>
           แตะเพื่อเล่น VDO
         </button>
       )}
-      <p className="f1-font-display pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white">
+      <p className="f1-font-display pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white lg:text-lg">
         ดู VDO ให้จบ แล้วตัวเลือกจะแสดง
       </p>
     </div>
@@ -237,6 +239,13 @@ export function PlayPage() {
   const ackTimerRef = useRef<number | null>(null);
   const portalStatusRef = useRef<PortalStatus>("idle");
   portalStatusRef.current = portalStatus;
+
+  // ขยายทั้งหน้าตามขนาดจอ (html.f1-play-scale ใน f1.css) — เฉพาะหน้าเกม หน้า editor คงขนาดเดิม
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.add("f1-play-scale");
+    return () => root.classList.remove("f1-play-scale");
+  }, []);
 
   useEffect(() => {
     setLoadError(null);
@@ -292,12 +301,12 @@ export function PlayPage() {
     return (
       <div className="f1-paper-bg min-h-screen">
         <F1Header />
-        <main className="f1-font-display mx-auto max-w-3xl space-y-3 p-6 text-f1-ink">
-          <p className="text-lg font-bold">{loadError ?? "กำลังโหลด..."}</p>
+        <main className="f1-font-display f1-pop-in-spring mx-auto max-w-3xl space-y-3 p-6 text-f1-ink lg:max-w-5xl lg:space-y-5">
+          <p className="text-lg font-bold lg:text-4xl">{loadError ?? "กำลังโหลด..."}</p>
           {loadError && (
             <>
-              <p className="text-sm text-f1-mute">ผู้ดูแลตั้งค่าชุดคำถามได้ที่หน้า /I-DOJO/editor (ต้องมีข้อที่สมบูรณ์อย่างน้อย 2 ข้อ)</p>
-              <Button className="bg-f1-brand text-f1-ink hover:bg-f1-brand-dark" onClick={() => setLoadAttempt((n) => n + 1)}>
+              <p className="text-sm text-f1-mute lg:text-2xl">ผู้ดูแลตั้งค่าชุดคำถามได้ที่หน้า /I-DOJO/editor (ต้องมีข้อที่สมบูรณ์อย่างน้อย 2 ข้อ)</p>
+              <Button className="f1-press bg-f1-brand text-f1-ink hover:bg-f1-brand-dark lg:h-14 lg:px-8 lg:text-2xl" onClick={() => setLoadAttempt((n) => n + 1)}>
                 ลองใหม่
               </Button>
             </>
@@ -431,7 +440,7 @@ export function PlayPage() {
     const hasImg = pair.promptType !== "text" && Boolean(pair.promptImage);
     const hasText = Boolean(pair.promptText.trim());
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 sm:gap-3">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 sm:gap-3 lg:gap-4">
         {hasImg && (
           <img
             src={pair.promptImage}
@@ -441,7 +450,7 @@ export function PlayPage() {
           />
         )}
         {hasText && (
-          <p className="f1-font-display shrink-0 text-center text-lg font-bold leading-snug text-f1-ink sm:text-2xl lg:text-3xl">
+          <p className="f1-font-display shrink-0 text-center text-xl font-bold leading-snug text-f1-ink sm:text-3xl lg:text-5xl">
             {pair.promptText}
           </p>
         )}
@@ -460,52 +469,60 @@ export function PlayPage() {
     const eliminated = !isPicked && wrongIds.includes(option.id);
     const hasImg = option.type !== "text" && Boolean(option.image);
     return (
-      <button
-        key={option.id}
-        type="button"
-        disabled={revealing || retryPrompt || eliminated}
-        onClick={() => choose(option)}
-        className={cn(
-          "f1-font-display relative flex min-h-0 min-w-0 items-center gap-3 overflow-hidden rounded-xl border-2 bg-white p-2 text-left shadow-sm transition-all duration-200 sm:p-3",
-          !revealing && !eliminated && "border-f1-line hover:-translate-y-0.5 hover:border-f1-brand hover:shadow-md active:translate-y-0",
-          eliminated && "cursor-not-allowed border-f1-line opacity-40 grayscale",
-          showOk && "border-[#15803D] bg-f1-ok-bg ring-2 ring-[#15803D]/40",
-          showOk && "f1-correct-bounce",
-          showBad && "f1-shake border-f1-wrong bg-f1-bad-bg",
-          revealing && !showOk && !showBad && "border-f1-line opacity-50",
-        )}
-      >
-        <span
+      // กรอบนอกเล่นแอนิเมชันโผล่ทีละใบ · ปุ่มข้างในเล่นกดยุบ/เยลลี่/สั่น (แยกกันไม่ให้ animation ทับกันแล้วเล่นซ้ำ)
+      <div key={option.id} className="f1-option-in flex min-h-0 min-w-0" style={{ animationDelay: `${i * 80}ms` }}>
+        <button
+          type="button"
+          disabled={revealing || retryPrompt || eliminated}
+          onClick={() => choose(option)}
           className={cn(
-            "f1-font-mono flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-bold sm:size-10 sm:text-lg",
-            // พื้นเหลืองใช้ตัวอักษรเข้ม (ขาวบนเหลืองอ่านไม่ออก)
-            showOk ? "bg-[#15803D] text-white" : showBad || eliminated ? "bg-f1-wrong text-white" : "bg-f1-brand text-f1-ink",
+            "f1-font-display f1-press relative flex min-h-0 min-w-0 flex-1 items-center gap-3 overflow-hidden rounded-xl border-2 bg-white p-2 text-left shadow-sm sm:p-3 lg:gap-4 lg:rounded-2xl lg:border-4 lg:p-4",
+            !revealing && !eliminated && "border-f1-line hover:-translate-y-1 hover:border-f1-brand hover:shadow-lg",
+            eliminated && "cursor-not-allowed border-f1-line opacity-40 grayscale",
+            showOk && "f1-jelly border-[#15803D] bg-f1-ok-bg ring-4 ring-[#15803D]/40",
+            showBad && "f1-wobble border-f1-wrong bg-f1-bad-bg",
+            revealing && !showOk && !showBad && "border-f1-line opacity-50",
           )}
         >
-          {showOk ? <Check className="size-5" strokeWidth={3} /> : showBad || eliminated ? <X className="size-5" strokeWidth={3} /> : LETTERS[i]}
-        </span>
-        <span className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1 sm:flex-row sm:justify-start sm:gap-3">
-          {hasImg && (
-            <img src={option.image} alt="" draggable={false} className="max-h-full min-h-0 w-full flex-1 rounded-md object-contain sm:w-auto sm:max-w-[50%] sm:flex-none" />
-          )}
-          {option.text && (
-            <span className="line-clamp-3 text-sm font-bold leading-snug text-f1-ink sm:text-lg lg:text-xl">{option.text}</span>
-          )}
-        </span>
-      </button>
+          <span
+            className={cn(
+              "f1-font-mono flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-bold transition-colors duration-200 sm:size-10 sm:text-lg lg:size-14 lg:rounded-lg lg:text-2xl",
+              // พื้นเหลืองใช้ตัวอักษรเข้ม (ขาวบนเหลืองอ่านไม่ออก)
+              showOk ? "bg-[#15803D] text-white" : showBad || eliminated ? "bg-f1-wrong text-white" : "bg-f1-brand text-f1-ink",
+            )}
+          >
+            {showOk ? (
+              <Check className="f1-icon-pop size-5 lg:size-8" strokeWidth={3} />
+            ) : showBad || eliminated ? (
+              <X className={cn("size-5 lg:size-8", showBad && "f1-icon-pop")} strokeWidth={3} />
+            ) : (
+              LETTERS[i]
+            )}
+          </span>
+          <span className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-1 sm:flex-row sm:justify-start sm:gap-3">
+            {hasImg && (
+              <img src={option.image} alt="" draggable={false} className="max-h-full min-h-0 w-full flex-1 rounded-md object-contain sm:w-auto sm:max-w-[50%] sm:flex-none" />
+            )}
+            {option.text && (
+              <span className="line-clamp-3 text-base font-bold leading-snug text-f1-ink sm:text-xl lg:text-3xl">{option.text}</span>
+            )}
+          </span>
+        </button>
+      </div>
     );
   }
 
   return (
     // เต็มจอทุกอุปกรณ์ (h-dvh) · ตอนถูกฝัง portal วางปุ่ม "ผ่านสถานี" ทับขอบล่าง ~90px จึงเว้นที่ไว้
-    <div className={cn("f1-paper-bg flex h-dvh flex-col overflow-hidden", embedded && "pb-28")}>
+    // เว้นเป็น px คงที่ (ปุ่มของ portal ไม่ได้ขยายตาม html.f1-play-scale เหมือนหน้านี้)
+    <div className={cn("f1-paper-bg flex h-dvh flex-col overflow-hidden", embedded && PORTAL_BOTTOM_GAP)}>
       <F1Header />
       {/* แถบเวลาบาง ๆ ใต้ header */}
-      <div className="h-[3px] w-full shrink-0 bg-zinc-200">
+      <div className="h-[3px] w-full shrink-0 bg-zinc-200 lg:h-1.5">
         {remaining !== null && (
           <div
             className={cn(
-              "h-full transition-all duration-1000 ease-linear",
+              "h-full transition-[width,background-color] duration-1000 ease-linear",
               lowTime && clockRunning ? "f1-timer-blink bg-f1-wrong" : "bg-f1-brand",
             )}
             style={{ width: `${(remaining / limit) * 100}%` }}
@@ -513,14 +530,17 @@ export function PlayPage() {
         )}
       </div>
 
-      <main className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-3 px-3 py-3 sm:px-6 lg:px-10">
+      <main className="mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col gap-3 px-3 py-3 sm:px-6 lg:gap-4 lg:px-10">
         <div className="flex shrink-0 items-center gap-3 sm:gap-4">
           <div className="min-w-0 flex-1">
             <GameTitle name={game.name} />
             {phase === "playing" && (
-              <p className="f1-font-display mt-0.5 truncate text-xs font-medium text-f1-mute sm:text-sm">
+              <p className="f1-font-display mt-0.5 truncate text-xs font-medium text-f1-mute sm:text-base lg:text-xl">
                 ข้อ <strong className="text-f1-ink">{index + 1} / {total}</strong> • ถูก{" "}
-                <strong className="text-f1-ok-ink">{score}</strong>
+                {/* key ตามคะแนน: เพิ่มทีไรตัวเลขเด้งที */}
+                <strong key={score} className={cn("text-f1-ok-ink", score > 0 && "f1-bump")}>
+                  {score}
+                </strong>
               </p>
             )}
           </div>
@@ -528,11 +548,11 @@ export function PlayPage() {
         </div>
 
         {phase === "idle" && (
-          <div className="flex min-h-0 flex-1 items-center justify-center">
-            <div className="f1-font-display w-full max-w-lg space-y-4 rounded-2xl border-2 border-f1-line bg-white p-6 text-center shadow-md">
-              <p className="text-xs font-medium tracking-widest text-f1-brand-ink">START LINE</p>
-              <p className="text-2xl font-bold text-f1-ink">พร้อมออกตัว?</p>
-              <ul className="space-y-1 text-left text-sm text-f1-ink-2">
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto">
+            <div className="f1-font-display f1-pop-in-spring w-full max-w-lg space-y-4 rounded-2xl border-2 border-f1-line bg-white p-6 text-center shadow-md lg:max-w-3xl lg:space-y-6 lg:rounded-3xl lg:border-4 lg:p-10">
+              <p className="text-xs font-medium tracking-widest text-f1-brand-ink lg:text-lg">START LINE</p>
+              <p className="text-3xl font-bold text-f1-ink lg:text-5xl">พร้อมออกตัว?</p>
+              <ul className="space-y-1 text-left text-base text-f1-ink-2 lg:space-y-2 lg:text-xl">
                 <li>• คำถามทั้งหมด {playableCount} ข้อ เลือกคำตอบที่ถูกข้อละ 1 ตัว</li>
                 <li>• ต้องตอบให้ถูกถึงจะไปข้อถัดไป ตอบผิดเลือกได้ว่าจะดู VDO ซ้ำหรือตอบใหม่เลย</li>
                 <li>• ข้อที่มี VDO ต้องดูให้จบก่อน ตัวเลือกถึงจะแสดง (ระหว่างดู VDO เวลาหยุด)</li>
@@ -548,10 +568,10 @@ export function PlayPage() {
               </ul>
               <Button
                 size="lg"
-                className="f1-glow h-14 w-full bg-f1-brand text-lg font-bold text-f1-ink hover:bg-f1-brand-dark"
+                className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-ink hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
                 onClick={startGame}
               >
-                <Flag /> เริ่มเกม
+                <Flag className="lg:size-8" /> เริ่มเกม
               </Button>
             </div>
           </div>
@@ -560,27 +580,41 @@ export function PlayPage() {
         {phase !== "idle" && current && (
           <>
             {/* ความคืบหน้า: จุดละข้อ (เขียว = ถูก · แดง = ผิด · ขอบเหลือง = ข้อปัจจุบัน) */}
-            <div className="flex shrink-0 flex-wrap justify-center gap-1.5" aria-hidden>
-              {rounds.map((r, i) => (
-                <span
-                  key={r.pair.id}
-                  className={cn(
-                    "h-2 w-6 rounded-full sm:w-8",
-                    i < results.length ? (results[i] ? "bg-[#15803D]" : "bg-f1-wrong") : "bg-zinc-300",
-                    i === index && phase === "playing" && "ring-2 ring-f1-brand ring-offset-1",
-                  )}
-                />
-              ))}
+            <div className="flex shrink-0 flex-wrap items-center justify-center gap-1.5 lg:gap-2.5" aria-hidden>
+              {rounds.map((r, i) => {
+                const isCurrent = i === index && phase === "playing";
+                return (
+                  <span
+                    key={r.pair.id}
+                    className={cn(
+                      // ข้อปัจจุบันยาวกว่า · ข้อที่เพิ่งตอบถูกเด้ง
+                      "f1-dot h-2 rounded-full lg:h-3",
+                      isCurrent ? "w-10 sm:w-14 lg:w-20" : "w-6 sm:w-8 lg:w-12",
+                      i < results.length ? (results[i] ? "bg-[#15803D]" : "bg-f1-wrong") : isCurrent ? "bg-f1-brand" : "bg-zinc-300",
+                      isCurrent && "shadow-[0_0_0.75rem_rgba(245,196,0,0.8)]",
+                      i === results.length - 1 && "f1-dot-pop",
+                    )}
+                  />
+                );
+              })}
             </div>
 
-            <section className="flex min-h-0 flex-[3] flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4">
-              <p className="f1-font-mono shrink-0 text-xs font-bold tracking-widest text-f1-brand-ink sm:text-sm">
+            {/* key ตามข้อ: เปลี่ยนข้อทีไรการ์ดคำถามเลื่อนเข้าแล้วเด้งใหม่ */}
+            <section
+              key={`${roundId}:${index}`}
+              className={cn(
+                "f1-q-enter flex min-h-0 flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4 lg:gap-3 lg:rounded-3xl lg:border-2 lg:p-6",
+                // ระหว่าง VDO ให้ VDO กินพื้นที่เกือบทั้งหมด · จบแล้วแบ่งที่ให้ตัวเลือก
+                videoDone ? "flex-[3]" : "flex-[5]",
+              )}
+            >
+              <p className="f1-font-mono shrink-0 text-xs font-bold tracking-widest text-f1-brand-ink sm:text-base lg:text-xl">
                 ข้อ {index + 1} / {total}
               </p>
               {current.pair.video && !videoDone ? (
                 <>
                   {current.pair.promptText.trim() && (
-                    <p className="f1-font-display shrink-0 text-center text-base font-bold text-f1-ink sm:text-xl">
+                    <p className="f1-font-display shrink-0 text-center text-lg font-bold text-f1-ink sm:text-2xl lg:text-4xl">
                       {current.pair.promptText}
                     </p>
                   )}
@@ -594,7 +628,7 @@ export function PlayPage() {
             {videoDone && (
               <section
                 className={cn(
-                  "grid min-h-0 flex-[2] auto-rows-fr gap-2 sm:gap-3",
+                  "grid min-h-0 flex-[2] auto-rows-fr gap-2 sm:gap-3 lg:gap-5",
                   current.options.length > 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2",
                 )}
               >
@@ -617,42 +651,42 @@ export function PlayPage() {
         <div
           className={cn(
             "f1-backdrop-fade fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4",
-            embedded && "pb-28",
+            embedded && PORTAL_BOTTOM_GAP,
           )}
           role="dialog"
           aria-modal="true"
           aria-labelledby="retry-title"
         >
-          <div className="f1-font-display f1-modal-pop w-full max-w-md rounded-sm border-4 border-f1-wrong bg-white p-6 text-center text-f1-ink">
-            <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-f1-bad-bg text-f1-wrong">
-              <X className="size-8" strokeWidth={3} />
+          <div className="f1-font-display f1-modal-pop w-full max-w-md rounded-xl border-4 border-f1-wrong bg-white p-6 text-center text-f1-ink lg:max-w-3xl lg:rounded-3xl lg:border-8 lg:p-10">
+            <span className="f1-icon-pop mx-auto flex size-14 items-center justify-center rounded-full bg-f1-bad-bg text-f1-wrong [animation-delay:150ms] lg:size-24">
+              <X className="size-8 lg:size-14" strokeWidth={3} />
             </span>
-            <p id="retry-title" className="mt-3 text-2xl font-bold">
+            <p id="retry-title" className="mt-3 text-3xl font-bold lg:mt-5 lg:text-5xl">
               ยังไม่ถูก ลองอีกครั้ง!
             </p>
-            <p className="mt-1 text-sm text-f1-mute">
+            <p className="mt-1 text-base text-f1-mute lg:mt-3 lg:text-2xl">
               {current.pair.video
                 ? "ต้องตอบข้อนี้ให้ถูกก่อนถึงจะไปข้อถัดไปได้ — อยากดู VDO อีกรอบไหม?"
                 : "ต้องตอบข้อนี้ให้ถูกก่อนถึงจะไปข้อถัดไปได้"}
             </p>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center lg:mt-8 lg:gap-4">
               {current.pair.video && (
-                <Button className="h-12 bg-f1-brand text-base text-f1-ink hover:bg-f1-brand-dark" onClick={replayVideo}>
-                  <Play /> ดู VDO อีกครั้ง
+                <Button className="f1-press h-12 bg-f1-brand text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl" onClick={replayVideo}>
+                  <Play className="lg:size-7" /> ดู VDO อีกครั้ง
                 </Button>
               )}
               <Button
                 variant={current.pair.video ? "outline" : "default"}
                 autoFocus
                 className={cn(
-                  "h-12 text-base",
+                  "f1-press h-12 text-lg lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl",
                   current.pair.video
                     ? "border-f1-brand bg-white text-f1-brand-ink hover:bg-f1-brand/10"
                     : "bg-f1-brand text-f1-ink hover:bg-f1-brand-dark",
                 )}
                 onClick={() => setRetryPrompt(false)}
               >
-                <RotateCcw /> {current.pair.video ? "ไม่ดู ตอบใหม่เลย" : "ตอบใหม่"}
+                <RotateCcw className="lg:size-7" /> {current.pair.video ? "ไม่ดู ตอบใหม่เลย" : "ตอบใหม่"}
               </Button>
             </div>
           </div>
@@ -665,30 +699,34 @@ export function PlayPage() {
         <div
           className={cn(
             "f1-backdrop-fade fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/60 p-4",
-            embedded && "pb-28",
+            embedded && PORTAL_BOTTOM_GAP,
           )}
         >
-          <div className="f1-font-display f1-modal-pop relative my-auto w-full max-w-lg rounded-sm border-4 border-f1-brand bg-white p-6 text-f1-ink">
-            <p className="text-center text-xs font-medium tracking-widest text-f1-brand-ink">
-              <Trophy className="inline size-4 align-text-bottom" /> RACE RESULT • สรุปผล
+          {/* สูงไม่เกินพื้นที่ที่เหลือ (ไม่ล้นลงไปใต้ปุ่มของ portal) — ถ้าไม่พอ เลื่อนเฉพาะรายการผลรายข้อ */}
+          <div className="f1-font-display f1-modal-pop relative flex max-h-full w-full max-w-lg flex-col rounded-xl border-4 border-f1-brand bg-white p-6 text-f1-ink [&>*]:shrink-0 lg:max-w-4xl lg:rounded-3xl lg:border-8 lg:p-8">
+            <p className="text-center text-sm font-medium tracking-widest text-f1-brand-ink lg:text-xl">
+              <Trophy className="inline size-4 align-text-bottom lg:size-7" /> RACE RESULT • สรุปผล
             </p>
-            {summary.timeout && <p className="mt-1 text-center text-sm font-bold text-f1-wrong">หมดเวลา!</p>}
-            <p
-              className={cn(
-                "mt-1 text-center text-5xl font-black tracking-wider",
-                summary.passed ? "text-f1-brand-ink" : "text-f1-wrong",
-              )}
-            >
-              {summary.passed ? "PASS" : "FAIL"}
+            {summary.timeout && <p className="mt-1 text-center text-base font-bold text-f1-wrong lg:text-3xl">หมดเวลา!</p>}
+            <p className="mt-1 text-center">
+              {/* ตรา PASS/FAIL ปั๊มลงมา */}
+              <span
+                className={cn(
+                  "f1-stamp text-6xl font-black tracking-wider lg:text-8xl",
+                  summary.passed ? "text-f1-brand-ink" : "text-f1-wrong",
+                )}
+              >
+                {summary.passed ? "PASS" : "FAIL"}
+              </span>
             </p>
-            <p className="mt-1 text-center text-sm text-f1-mute">
+            <p className="f1-rise-in mt-1 text-center text-base text-f1-mute [animation-delay:450ms] lg:text-2xl">
               {summary.passed ? "ผ่านเส้นชัย! ยอดเยี่ยม" : `ต้องตอบถูกอย่างน้อย ${summary.required} ข้อถึงจะผ่าน`}
             </p>
 
             {embedded && portalStatus !== "idle" && (
               <div
                 className={cn(
-                  "mt-3 flex flex-wrap items-center justify-center gap-2 rounded-sm px-3 py-2 text-center text-sm",
+                  "f1-rise-in mt-3 flex flex-wrap items-center justify-center gap-2 rounded-lg px-3 py-2 text-center text-base lg:mt-5 lg:gap-3 lg:px-5 lg:py-3 lg:text-2xl",
                   portalStatus === "sending" && "bg-zinc-100 text-f1-ink",
                   portalStatus === "sent" && "bg-zinc-100 text-f1-ink",
                   portalStatus === "error" && "bg-f1-bad-bg text-f1-bad",
@@ -696,12 +734,12 @@ export function PlayPage() {
               >
                 {portalStatus === "sending" && (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> กำลังส่งผลไปที่จอ…
+                    <Loader2 className="size-4 animate-spin lg:size-7" /> กำลังส่งผลไปที่จอ…
                   </>
                 )}
                 {portalStatus === "sent" && (
                   <>
-                    <Check className="size-4" /> ส่งผลไปที่จอสำเร็จ
+                    <Check className="f1-icon-pop size-4 lg:size-7" /> ส่งผลไปที่จอสำเร็จ
                   </>
                 )}
                 {portalStatus === "error" && (
@@ -710,7 +748,7 @@ export function PlayPage() {
                     {lastReportRef.current && (
                       <Button
                         size="sm"
-                        className="bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+                        className="f1-press bg-f1-brand text-f1-ink hover:bg-f1-brand-dark lg:h-14 lg:px-6 lg:text-2xl"
                         onClick={() => lastReportRef.current && report(lastReportRef.current)}
                       >
                         ส่งใหม่
@@ -721,37 +759,41 @@ export function PlayPage() {
               </div>
             )}
 
-            <div className="f1-font-mono mt-4 grid grid-cols-2 gap-2 text-center text-sm">
-              <div className="rounded-sm bg-zinc-100 p-2">
-                <p className="text-[10px] text-f1-brand-ink">คะแนน</p>
-                <p className="text-lg font-bold">
+            <div className="f1-font-mono mt-4 grid grid-cols-2 gap-2 text-center lg:mt-6 lg:gap-4">
+              <div className="f1-rise-in rounded-lg bg-zinc-100 p-2 [animation-delay:550ms] lg:p-4">
+                <p className="text-xs text-f1-brand-ink lg:text-lg">คะแนน</p>
+                <p className="text-xl font-bold lg:text-4xl">
                   ถูก {summary.score} / {summary.total}
                 </p>
               </div>
-              <div className="rounded-sm bg-zinc-100 p-2">
-                <p className="text-[10px] text-f1-brand-ink">เวลาที่ใช้</p>
-                <p className="text-lg font-bold">{formatTime(summary.timeUsed)}</p>
+              <div className="f1-rise-in rounded-lg bg-zinc-100 p-2 [animation-delay:650ms] lg:p-4">
+                <p className="text-xs text-f1-brand-ink lg:text-lg">เวลาที่ใช้</p>
+                <p className="text-xl font-bold lg:text-4xl">{formatTime(summary.timeUsed)}</p>
               </div>
             </div>
 
-            <ol className="mt-4 max-h-[30vh] space-y-1.5 overflow-y-auto pr-1 text-sm">
+            <ol className="mt-4 min-h-0 space-y-1.5 overflow-y-auto pr-1 text-base lg:mt-6 lg:space-y-2 lg:text-xl" style={{ flexShrink: 1 }}>
               {rounds.map((r, i) => {
                 const answered = i < results.length;
                 const ok = answered && results[i];
                 return (
-                  <li key={r.pair.id} className="flex items-center gap-2 rounded-sm border border-f1-line bg-zinc-50 px-2 py-1">
+                  <li
+                    key={r.pair.id}
+                    className="f1-rise-in flex items-center gap-2 rounded-lg border border-f1-line bg-zinc-50 px-2 py-1 lg:gap-3 lg:px-4 lg:py-2"
+                    style={{ animationDelay: `${750 + Math.min(i, 12) * 60}ms` }}
+                  >
                     {ok ? (
-                      <CircleCheck className="size-4 shrink-0 text-f1-ok-ink" />
+                      <CircleCheck className="size-5 shrink-0 text-f1-ok-ink lg:size-7" />
                     ) : (
-                      <CircleX className="size-4 shrink-0 text-f1-wrong" />
+                      <CircleX className="size-5 shrink-0 text-f1-wrong lg:size-7" />
                     )}
                     <span className="min-w-0 flex-1 truncate">
                       {i + 1}. {r.pair.promptText || "(ภาพ)"}
                     </span>
                     {!answered ? (
-                      <span className="shrink-0 text-xs text-f1-mute">ยังตอบไม่ถูก</span>
+                      <span className="shrink-0 text-sm text-f1-mute lg:text-lg">ยังตอบไม่ถูก</span>
                     ) : (
-                      tries[i] > 1 && <span className="shrink-0 text-xs text-f1-mute">ตอบ {tries[i]} ครั้ง</span>
+                      tries[i] > 1 && <span className="shrink-0 text-sm text-f1-mute lg:text-lg">ตอบ {tries[i]} ครั้ง</span>
                     )}
                   </li>
                 );
@@ -760,21 +802,21 @@ export function PlayPage() {
 
             {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ: ผ่าน → สถานีถัดไป, ไม่ผ่าน → โหลดเกมใหม่ */}
             {resultHandedOff && (
-              <p className="mt-4 text-center text-sm font-medium text-f1-mute">
+              <p className="mt-4 text-center text-base font-medium text-f1-mute lg:mt-6 lg:text-2xl">
                 {summary.passed ? "ผ่านแล้ว — จอจะไปสถานีถัดไปเอง" : "จอจะโหลดเกมใหม่ให้ลองอีกครั้ง"}
               </p>
             )}
 
             {!embedded && (
-              <div className="mt-5 flex justify-center">
+              <div className="f1-rise-in mt-5 flex justify-center [animation-delay:900ms] lg:mt-8">
                 {/* ผ่าน → กลับหน้าหลัก (หน้าเริ่มเกม) · ไม่ผ่าน → เล่นใหม่ทันที */}
                 {summary.passed ? (
-                  <Button className="bg-f1-brand text-f1-ink hover:bg-f1-brand-dark" onClick={goHome}>
-                    <Home /> กลับไปหน้าหลัก
+                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={goHome}>
+                    <Home className="lg:size-7" /> กลับไปหน้าหลัก
                   </Button>
                 ) : (
-                  <Button className="bg-f1-brand text-f1-ink hover:bg-f1-brand-dark" onClick={startGame}>
-                    เล่นใหม่
+                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={startGame}>
+                    <RotateCcw className="lg:size-7" /> เล่นใหม่
                   </Button>
                 )}
               </div>
