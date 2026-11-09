@@ -369,7 +369,8 @@ export function PlayPage() {
     setPicked(null);
     setRetryPrompt(false);
     setSummary({ score: s, total, required, passed, timeout, timeUsed: hasLimit ? Math.min(elapsedRef.current, limit) : elapsedRef.current });
-    report({ result: passed ? "pass" : "fail", score: s });
+    // score ที่ส่ง portal = % ของข้อที่ตอบถูก จำนวนเต็ม 0–100 (STATION_ACTIVITY.md 3.1) — หน้าสรุปยังแสดงเป็นจำนวนข้อ
+    report({ result: passed ? "pass" : "fail", score: total > 0 ? Math.round((100 * s) / total) : 0 });
   }
 
   // ตอบผิด → เอฟเฟกต์ผิด แล้วเด้งป๊อปอัปให้เลือกดู VDO ซ้ำ/ตอบใหม่ · อยู่ข้อเดิมจนกว่าจะตอบถูก
