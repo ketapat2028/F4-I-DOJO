@@ -24,6 +24,7 @@ export interface Theme {
   name: string;
   timeLimitSeconds: number; // เวลารวมทั้งเกม · 0 = ไม่จำกัดเวลา
   passPercent: number; // เกณฑ์ผ่าน: ตอบถูกอย่างน้อยกี่ % ของจำนวนข้อ (ปัดขึ้น)
+  brandColor?: string; // สีธีมหลัก (#rrggbb) — ไม่มี = ขาวดำ
   pairs: MatchPair[];
   createdAt: number;
   updatedAt: number;

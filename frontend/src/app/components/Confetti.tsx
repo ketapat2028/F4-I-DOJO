@@ -1,13 +1,15 @@
-const COLORS = ["#F5C400", "#18181B", "#FFD84D", "#FFFFFF", "#22C55E"];
+import { useMemo } from "react";
+import { currentBrandColors } from "../utils/brandColor";
 
 const PIECES = Array.from({ length: 28 }, (_, i) => ({
   left: (i * 37) % 100,
   delay: ((i * 53) % 100) / 100,
   duration: 2 + ((i * 29) % 100) / 60,
-  color: COLORS[i % COLORS.length],
 }));
 
 export function Confetti() {
+  // สีตามธีมที่ผู้ดูแลเลือกอยู่ตอนนี้
+  const colors = useMemo(currentBrandColors, []);
   return (
     <div className="pointer-events-none fixed inset-0 z-[80] overflow-hidden" aria-hidden>
       {PIECES.map((p, i) => (
@@ -16,7 +18,7 @@ export function Confetti() {
           className="f1-confetti-piece"
           style={{
             left: `${p.left}%`,
-            backgroundColor: p.color,
+            backgroundColor: colors[i % colors.length],
             animationDelay: `${p.delay}s`,
             animationDuration: `${p.duration}s`,
           }}

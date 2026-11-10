@@ -1,14 +1,14 @@
 @custom-variant fit (@media (min-width: 1024px) and (min-height: 620px));
 
-/* Palette: white / grey carry the surfaces, yellow is the single brand + action colour, charcoal the header,
-   red is reserved for "answer wrong" and green for "answer correct".
-   Yellow is too light for text on white: buttons on yellow use dark ink text (on-brand 12.6), brand-coloured
-   text on white uses brand-ink (5.0). ink on card 18.9, mute on card 5.3. */
+/* Palette: white / grey carry the surfaces; ONE brand colour (admin-selectable, default black) is the action colour.
+   brand-dark / brand-ink / brand-bright / on-brand are derived from it at runtime by utils/brandColor.ts.
+   Charcoal = header, red = "answer wrong", green = "answer correct". */
 @theme {
-  --color-f1-brand: #f5c400;
-  --color-f1-brand-dark: #ddb000;
-  --color-f1-brand-ink: #8a6a00;
-  --color-f1-brand-bright: #ffd84d;
+  --color-f1-brand: #111113;
+  --color-f1-brand-dark: #3f3f46;
+  --color-f1-brand-ink: #111113;
+  --color-f1-brand-bright: #ffffff;
+  --color-f1-on-brand: #ffffff; /* ตัวหนังสือบนปุ่มสีแบรนด์ — ถูกคำนวณใหม่ใน utils/brandColor.ts */
   --color-f1-wrong: #dc0000;
   --color-f1-wrong-bright: #ff3b3b;
   --color-f1-ink: #111113;
@@ -62,11 +62,11 @@
   background: linear-gradient(
     200deg,
     transparent 0 46%,
-    rgba(245, 196, 0, 0.13) 46% 49%,
+    color-mix(in srgb, var(--color-f1-brand) 10%, transparent) 46% 49%,
     transparent 49% 53%,
     rgba(24, 24, 27, 0.09) 53% 55%,
     transparent 55% 58%,
-    rgba(245, 196, 0, 0.07) 58% 59.5%,
+    color-mix(in srgb, var(--color-f1-brand) 6%, transparent) 58% 59.5%,
     transparent 59.5%
   );
   pointer-events: none;
@@ -290,7 +290,7 @@ html.f1-play-scale {
   100% { background-position: -200px 0; }
 }
 .f1-dragging {
-  background-image: repeating-linear-gradient(90deg, rgba(245, 196, 0,0.45) 0 2px, transparent 2px 14px);
+  background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--color-f1-brand) 35%, transparent) 0 2px, transparent 2px 14px);
   animation: f1-speedlines 0.3s linear infinite;
 }
 
@@ -314,7 +314,7 @@ html.f1-play-scale {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: 0 0 1.5rem 0.5rem rgba(245, 196, 0, 0.95);
+  box-shadow: 0 0 1.5rem 0.5rem color-mix(in srgb, var(--color-f1-brand) 50%, var(--color-f1-brand-bright));
   pointer-events: none;
   animation: f1-pulse-opacity 1.2s ease-in-out infinite;
   will-change: opacity;
@@ -337,9 +337,9 @@ html.f1-play-scale {
 
 @keyframes f1-slot-blink {
   0%, 100% {
-    border-color: #f5c400;
-    background-color: rgba(245, 196, 0, 0.1);
-    box-shadow: 0 0 14px 2px rgba(245, 196, 0, 0.35);
+    border-color: var(--color-f1-brand);
+    background-color: color-mix(in srgb, var(--color-f1-brand) 10%, transparent);
+    box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-f1-brand) 35%, transparent);
   }
   50% {
     border-color: #8b8b95;
@@ -353,8 +353,8 @@ html.f1-play-scale {
 @media (prefers-reduced-motion: reduce) {
   .f1-slot-blink {
     animation: none;
-    border-color: #f5c400;
-    background-color: rgba(245, 196, 0, 0.1);
+    border-color: var(--color-f1-brand);
+    background-color: color-mix(in srgb, var(--color-f1-brand) 10%, transparent);
   }
 }
 

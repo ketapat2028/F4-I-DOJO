@@ -73,7 +73,7 @@ function RaceClock({ remaining, elapsed, limit, running }: { remaining: number |
     <div
       className={cn(
         "flex h-11 shrink-0 items-center gap-2 rounded-full border-2 pl-1.5 pr-4 shadow-md transition-colors duration-500 sm:h-14 sm:gap-3 sm:pr-5 lg:h-16 lg:pr-6",
-        low && running ? "border-f1-wrong shadow-[0_0_24px_rgba(220,0,0,0.6)]" : "border-f1-brand",
+        low && running ? "border-f1-wrong shadow-[0_0_24px_rgba(220,0,0,0.6)]" : "border-f1-brand-bright",
         critical && running && "f1-clock-pulse",
       )}
       style={{ backgroundColor: "#18181b" }}
@@ -192,7 +192,7 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
           onClick={tryPlay}
           className="f1-font-display f1-press absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-lg font-bold text-white lg:text-3xl"
         >
-          <span className="f1-glow flex size-16 items-center justify-center rounded-full bg-f1-brand text-f1-ink shadow-lg lg:size-24">
+          <span className="f1-glow flex size-16 items-center justify-center rounded-full bg-f1-brand-bright text-f1-ink shadow-lg lg:size-24">
             <Play className="size-8 translate-x-0.5 lg:size-12" fill="currentColor" />
           </span>
           แตะเพื่อเล่น VDO
@@ -319,7 +319,7 @@ export function PlayPage() {
           {loadError && (
             <>
               <p className="text-sm text-f1-mute lg:text-2xl">ผู้ดูแลตั้งค่าชุดคำถามได้ที่หน้า /I-DOJO/editor (ต้องมีข้อที่สมบูรณ์อย่างน้อย 2 ข้อ)</p>
-              <Button className="f1-press bg-f1-brand text-f1-ink hover:bg-f1-brand-dark lg:h-14 lg:px-8 lg:text-2xl" onClick={() => setLoadAttempt((n) => n + 1)}>
+              <Button className="f1-press bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark lg:h-14 lg:px-8 lg:text-2xl" onClick={() => setLoadAttempt((n) => n + 1)}>
                 ลองใหม่
               </Button>
             </>
@@ -501,7 +501,7 @@ export function PlayPage() {
             className={cn(
               "f1-font-mono flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-bold transition-colors duration-200 sm:size-10 sm:text-lg lg:size-14 lg:rounded-lg lg:text-2xl",
               // พื้นเหลืองใช้ตัวอักษรเข้ม (ขาวบนเหลืองอ่านไม่ออก)
-              showOk ? "bg-[#15803D] text-white" : showBad || eliminated ? "bg-f1-wrong text-white" : "bg-f1-brand text-f1-ink",
+              showOk ? "bg-[#15803D] text-white" : showBad || eliminated ? "bg-f1-wrong text-white" : "bg-f1-brand text-f1-on-brand",
             )}
           >
             {showOk ? (
@@ -582,7 +582,7 @@ export function PlayPage() {
               </ul>
               <Button
                 size="lg"
-                className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-ink hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
+                className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-on-brand hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
                 onClick={startGame}
               >
                 <Flag className="lg:size-8" /> เริ่มเกม
@@ -652,7 +652,7 @@ export function PlayPage() {
           aria-label={`VDO ข้อ ${index + 1}`}
         >
           <div className="f1-font-display flex shrink-0 items-baseline justify-center gap-3 px-2 text-center text-white lg:gap-5">
-            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand sm:text-lg lg:text-2xl">
+            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand-bright sm:text-lg lg:text-2xl">
               ข้อ {index + 1} / {total}
             </span>
             {current.pair.promptText.trim() && (
@@ -703,7 +703,7 @@ export function PlayPage() {
             </p>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center lg:mt-8 lg:gap-4">
               {current.pair.video && (
-                <Button className="f1-press h-12 bg-f1-brand text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl" onClick={replayVideo}>
+                <Button className="f1-press h-12 bg-f1-brand text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl" onClick={replayVideo}>
                   <Play className="lg:size-7" /> ดู VDO อีกครั้ง
                 </Button>
               )}
@@ -714,7 +714,7 @@ export function PlayPage() {
                   "f1-press h-12 text-lg lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl",
                   current.pair.video
                     ? "border-f1-brand bg-white text-f1-brand-ink hover:bg-f1-brand/10"
-                    : "bg-f1-brand text-f1-ink hover:bg-f1-brand-dark",
+                    : "bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark",
                 )}
                 onClick={() => setRetryPrompt(false)}
               >
@@ -780,7 +780,7 @@ export function PlayPage() {
                     {lastReportRef.current && (
                       <Button
                         size="sm"
-                        className="f1-press bg-f1-brand text-f1-ink hover:bg-f1-brand-dark lg:h-14 lg:px-6 lg:text-2xl"
+                        className="f1-press bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark lg:h-14 lg:px-6 lg:text-2xl"
                         onClick={() => lastReportRef.current && report(lastReportRef.current)}
                       >
                         ส่งใหม่
@@ -843,11 +843,11 @@ export function PlayPage() {
               <div className="f1-rise-in mt-5 flex justify-center [animation-delay:900ms] lg:mt-8">
                 {/* ผ่าน → กลับหน้าหลัก (หน้าเริ่มเกม) · ไม่ผ่าน → เล่นใหม่ทันที */}
                 {summary.passed ? (
-                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={goHome}>
+                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={goHome}>
                     <Home className="lg:size-7" /> กลับไปหน้าหลัก
                   </Button>
                 ) : (
-                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-ink hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={startGame}>
+                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={startGame}>
                     <RotateCcw className="lg:size-7" /> เล่นใหม่
                   </Button>
                 )}

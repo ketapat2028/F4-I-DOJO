@@ -1,3 +1,4 @@
+import { applyBrandColor, normalizeHex } from "./brandColor";
 import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme";
 
 // key เดิมตอนยังเก็บใน localStorage — เหลือไว้อ่านเพื่อย้ายข้อมูลขึ้น server เท่านั้น (readLegacyLocalGame)
@@ -259,6 +260,7 @@ function toPayload(game: Theme) {
     name: game.name,
     timeLimitSeconds: game.timeLimitSeconds,
     passPercent: game.passPercent,
+    brandColor: game.brandColor,
     pairs: game.pairs.map(toSpecRecord),
   };
 }
@@ -272,6 +274,7 @@ function fromPayload(data: unknown): Theme {
     passPercent: Number.isFinite(m.passPercent)
       ? Math.min(100, Math.max(1, Math.round(m.passPercent as number)))
       : DEFAULT_PASS_PERCENT,
+    brandColor: normalizeHex(m.brandColor) ?? undefined,
     pairs: recordsToPairs(data),
     createdAt: 0,
     updatedAt: 0,
@@ -295,6 +298,7 @@ export async function getGame(): Promise<Theme> {
   if (res.status === 404) throw new NoGameError();
   if (!res.ok) throw await failure(res, "โหลดชุดคำถาม");
   const game = fromPayload(await res.json());
+  applyBrandColor(game.brandColor);
   if (game.pairs.length < 2) throw new NoGameError();
   return game;
 }

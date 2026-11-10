@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Film, FolderOpen, Lock, TriangleAlert, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, Film, FolderOpen, Lock, Palette, TriangleAlert, Wrench } from "lucide-react";
 import { useNavigate } from "react-router";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme";
+import { applyBrandColor, applyCachedBrandColor, BRAND_PRESETS, DEFAULT_BRAND_COLOR, normalizeHex } from "../utils/brandColor";
 import { fileToUploadableImage } from "../utils/image";
 import {
   checkImageFile,
@@ -89,7 +90,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
             type="button"
             onClick={() => onType(t)}
             className={`f1-font-display rounded-sm border px-3 py-1 text-xs font-medium ${
-              type === t ? "border-f1-brand bg-f1-brand text-f1-ink" : "border-f1-line bg-white text-zinc-700"
+              type === t ? "border-f1-brand bg-f1-brand text-f1-on-brand" : "border-f1-line bg-white text-zinc-700"
             }`}
           >
             {TYPE_LABEL[t]}
@@ -130,7 +131,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
               type="button"
               size="sm"
               disabled={uploading}
-              className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+              className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
               onClick={() => fileRef.current?.click()}
             >
               <FolderOpen /> เลือกรูปจากเครื่อง
@@ -290,7 +291,7 @@ function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
           type="button"
           size="sm"
           disabled={busy}
-          className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+          className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
           onClick={() => fileRef.current?.click()}
         >
           <FolderOpen /> เลือก VDO จากเครื่อง
@@ -411,6 +412,13 @@ export function EditPage() {
       });
   }, [secret, game]);
 
+  // ดูตัวอย่างสีธีมทันทีที่เลือก (ยังไม่ cache) — ออกจากหน้าโดยไม่บันทึกจะกลับเป็นสีเดิม
+  const brandColor = game?.brandColor;
+  useEffect(() => {
+    if (game) applyBrandColor(brandColor, false);
+  }, [brandColor, !!game]);
+  useEffect(() => () => applyCachedBrandColor(), []);
+
   useEffect(() => {
     if (!status) return;
     const t = setTimeout(() => setStatus(null), 3500);
@@ -502,7 +510,7 @@ export function EditPage() {
               <Button
                 type="submit"
                 disabled={checkingSecret || !secretInput.trim()}
-                className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+                className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
               >
                 {checkingSecret ? "กำลังตรวจ..." : "เข้าสู่ EDIT MODE"}
               </Button>
@@ -630,6 +638,7 @@ export function EditPage() {
     setSaving(true);
     try {
       await saveGame(game, secret);
+      applyBrandColor(game.brandColor);
       navigate("/");
     } catch (e) {
       setStatus(errorText(e, "อัปโหลดไม่สำเร็จ"));
@@ -717,6 +726,63 @@ export function EditPage() {
               {game.pairs.filter(isPairComplete).length} ข้อ
             </span>
           </label>
+          <div className="space-y-2 text-sm text-zinc-700 sm:col-span-2">
+            <span className="flex items-center gap-1.5">
+              <Palette className="size-4 text-f1-brand-ink" /> สีธีม
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {BRAND_PRESETS.map((p) => {
+                const active = (game.brandColor ?? DEFAULT_BRAND_COLOR) === p.color;
+                return (
+                  <button
+                    key={p.color}
+                    type="button"
+                    title={p.name}
+                    aria-label={`สีธีม ${p.name}`}
+                    aria-pressed={active}
+                    onClick={() => setGame({ ...game, brandColor: p.color })}
+                    className={`flex items-center gap-1.5 rounded-full border-2 py-1 pl-1 pr-3 text-xs ${
+                      active ? "border-f1-ink bg-zinc-100 font-bold text-f1-ink" : "border-f1-line bg-white"
+                    }`}
+                  >
+                    <span className="size-5 rounded-full border border-black/15" style={{ backgroundColor: p.color }} />
+                    {p.name}
+                  </button>
+                );
+              })}
+              <label className="flex items-center gap-1.5 rounded-full border-2 border-f1-line bg-white py-1 pl-1 pr-2 text-xs">
+                <input
+                  type="color"
+                  aria-label="เลือกสีเอง"
+                  value={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  onChange={(e) => setGame({ ...game, brandColor: e.target.value })}
+                  className="size-6 cursor-pointer rounded-full border-0 bg-transparent p-0"
+                />
+                <span>สีเอง</span>
+                <Input
+                  key={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  defaultValue={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  onBlur={(e) => {
+                    const hex = normalizeHex(e.target.value);
+                    if (hex) setGame({ ...game, brandColor: hex });
+                    else e.target.value = game.brandColor ?? DEFAULT_BRAND_COLOR;
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                  aria-label="รหัสสี hex"
+                  className="f1-font-mono h-7 w-24 border-[#8B8B95] bg-white px-2 text-xs text-f1-ink"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-f1-mute">ตัวอย่าง:</span>
+              <span className="f1-font-display rounded-md bg-f1-brand px-3 py-1 text-sm font-bold text-f1-on-brand">ปุ่มหลัก</span>
+              <span className="text-sm font-bold text-f1-brand-ink">ตัวหนังสือสีธีม</span>
+              <span className="f1-navy-bg rounded-md px-3 py-1 text-sm font-bold text-f1-brand-bright">บนแถบหัว</span>
+            </div>
+            <span className="block text-xs text-f1-mute">
+              เห็นผลทันทีในหน้านี้ · กดอัปโหลดเพื่อใช้กับทุกจอ · ระบบปรับสีตัวหนังสือให้อ่านออกเองอัตโนมัติ
+            </span>
+          </div>
         </div>
 
         <h2 className="f1-font-display text-sm font-bold text-f1-ink">
@@ -896,7 +962,7 @@ export function EditPage() {
           </Button>
           <Button
             disabled={saving}
-            className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+            className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
             onClick={handleSave}
           >
             อัปโหลดแล้วไปเล่น

@@ -150,7 +150,7 @@ async function initDB() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
-  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, timeLimitSeconds, passPercent, pairs: [SpecRecord] }
+  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, timeLimitSeconds, passPercent, brandColor?, pairs: [SpecRecord] }
   await query(`
     CREATE TABLE IF NOT EXISTS game (
       singleton  TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,
@@ -262,7 +262,7 @@ app.get('/api/game', async (req, res) => {
 });
 
 app.put('/api/game', requireAdmin, async (req, res) => {
-  const { name, timeLimitSeconds, passPercent, pairs } = req.body || {};
+  const { name, timeLimitSeconds, passPercent, brandColor, pairs } = req.body || {};
   if (!Array.isArray(pairs) || pairs.length < 2) {
     return res.status(400).json({ error: 'ต้องมีอย่างน้อย 2 คู่' });
   }
@@ -272,6 +272,8 @@ app.put('/api/game', requireAdmin, async (req, res) => {
       timeLimitSeconds: Number.isFinite(timeLimitSeconds) ? Math.max(0, timeLimitSeconds) : 0,
       // เกณฑ์ผ่าน (% ของจำนวนข้อ) — ไม่ส่งมา frontend ใช้ค่าเริ่มต้น 70
       ...(Number.isFinite(passPercent) ? { passPercent: Math.min(100, Math.max(1, Math.round(passPercent))) } : {}),
+      // สีธีมหลักที่ผู้ดูแลเลือก (#rrggbb) — ไม่ส่งมา = ขาวดำ
+      ...(typeof brandColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(brandColor) ? { brandColor: brandColor.toLowerCase() } : {}),
       pairs,
     });
     await query(

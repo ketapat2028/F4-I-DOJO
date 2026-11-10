@@ -191,7 +191,7 @@ export function ConvertPage() {
                     <a
                       href={it.url}
                       download={it.result.file.name}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-f1-brand px-3 text-sm font-bold text-f1-ink hover:bg-f1-brand-dark"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-f1-brand px-3 text-sm font-bold text-f1-on-brand hover:bg-f1-brand-dark"
                     >
                       <Download className="size-4" /> ดาวน์โหลด {it.result.file.name}
                     </a>
