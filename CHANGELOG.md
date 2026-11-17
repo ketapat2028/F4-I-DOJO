@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed — เอารหัสผู้ดูแลออกจากหน้า editor
+- หน้า `/I-DOJO/editor` เข้าแก้ไขได้ทันทีโดยไม่ต้องใส่รหัส — ลบหน้า login, `verifyAdmin`, `UnauthorizedError`, การเก็บรหัสใน `sessionStorage` ออกจาก `EditPage.tsx`/`gameStore.ts`
+- backend: ลบ `requireAdmin` middleware และ `GET /api/admin/check` ออก — `PUT /api/game`, `POST /api/upload`, `POST /api/upload-video`, `POST`/`DELETE /api/records`, `POST /api/app-config` ไม่ตรวจ `x-admin-secret` แล้ว · ตัด `ADMIN_SECRET` ออกจาก `.env.example`
+
 ### Changed — VDO ของข้อเปิดเต็มจอ
 - ระหว่าง VDO เล่น แสดงเป็นหน้าต่างเต็มจอพื้นดำ VDO อยู่กลางจอ (เดิมอยู่ในการ์ดคำถาม ถูกดันลงล่างและเล็ก) · แถบบนบอก "ข้อ N / M" + โจทย์ · เด้งเข้า (fade + spring) · จบแล้วปิดเอง ตัวเลือกเด้งขึ้นตามเดิม · ปุ่ม "ดู VDO อีกครั้ง" เปิดหน้าต่างนี้ใหม่ · ฝังใน portal เว้นขอบล่าง 96px ให้ปุ่มของ portal ไม่ทับภาพ
 - ทดสอบ headless Chrome ที่ 1920×1080, 3840×2160, 390×844 และ iframe 1920×960

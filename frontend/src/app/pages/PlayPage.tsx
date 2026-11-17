@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, CircleCheck, CircleX, Flag, Home, Loader2, Play, RotateCcw, Trophy, X } from "lucide-react";
+import { Check, CircleCheck, CircleX, Flag, Home, Loader2, Play, RotateCcw, ThumbsUp, Trophy, X } from "lucide-react";
 import { Confetti } from "../components/Confetti";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
@@ -8,8 +8,10 @@ import type { AnswerOption, MatchPair, Theme } from "../types/theme";
 import { getGame, isPairComplete, NoGameError } from "../utils/gameStore";
 import { forwardKeys, isEmbedded, listenPortal, sendResult, type PortalAck, type PortalResult } from "../utils/portalBridge";
 
-// idle = รอกดเริ่ม · playing = กำลังเล่น · finished = จบเกม (ตอบครบหรือหมดเวลา)
-type Phase = "idle" | "playing" | "finished";
+// idle = รอกดเริ่ม · jigsaw = นับถอยหลังเกมจิ๊กซอนอกเว็บ · jigsawDone = หมดเวลาจิ๊กซอ
+// playing = กำลังเล่น (เกมตอบคำถาม) · finished = จบเกมตอบคำถาม (ตอบครบหรือหมดเวลา)
+// จิ๊กซออยู่ก่อนหรือหลังเกมตอบคำถามได้ (game.firstGame) — jigsaw/jigsawDone ใช้ซ้ำทั้ง 2 ตำแหน่ง ดูบริบทจาก game.firstGame ตอน render
+type Phase = "idle" | "jigsaw" | "jigsawDone" | "playing" | "finished";
 // 1 ข้อที่จะเล่น: ตัวเลือกสลับลำดับไว้แล้วตอนเริ่มรอบ
 type Round = { pair: MatchPair; options: AnswerOption[] };
 type Summary = { score: number; total: number; required: number; passed: boolean; timeout: boolean; timeUsed: number };
@@ -19,13 +21,13 @@ type PortalReport = { result: PortalResult; score: number };
 // portal ไม่ตอบ ack ภายในเวลานี้ = ถือว่ายังไม่ได้บันทึก (PORTAL_INTEGRATION.md ข้อ 2)
 const ACK_TIMEOUT_MS = 10_000;
 // หน่วงหลังตอบ ให้ผู้เล่นเห็นผลก่อนไปข้อถัดไป (GAMEPLAY.md 3.3 ข้อ 6)
-const REVEAL_MS = 1200;
+const REVEAL_MS = 2200;
 // ตอบผิด: ให้เห็นเอฟเฟกต์ผิดก่อน แล้วค่อยเด้งป๊อปอัปถามดู VDO ซ้ำ
 const WRONG_REVEAL_MS = 700;
+// จิ๊กซอเป็นเกมที่สอง (ปิดท้าย): ให้เห็นหน้าสรุปผล PASS/FAIL แป๊บนึงก่อนขึ้นนับถอยหลังต่อเอง
+const SECOND_GAME_DELAY_MS = 3000;
 // เวลาเหลือเท่านี้ (วินาที) ตัวเลขเริ่มกะพริบ
 const LOW_TIME_S = 30;
-// VDO ไม่ขยับเลยนานเท่านี้ (โหลดไม่ขึ้น/ค้างกลางทาง) = ข้ามไปแสดงตัวเลือก ไม่ให้เกมค้าง
-const VIDEO_STALL_S = 15;
 const LETTERS = "ABCDEFGHIJ";
 // ตอนถูกฝัง: เว้นขอบล่างให้ปุ่ม "ENTER / SPACEBAR · ผ่านสถานี" ของ portal (~90px, STATION_ACTIVITY.md ข้อ 5)
 const PORTAL_BOTTOM_GAP = "pb-[96px]";
@@ -114,67 +116,35 @@ function setVideoPlaying(on: boolean) {
   document.documentElement.classList.toggle("f1-video-playing", on);
 }
 
-// VDO ของข้อ: เล่นอัตโนมัติ ไม่มีปุ่มควบคุม (ข้ามไม่ได้) · จบ/โหลดไม่ได้/ค้าง → onDone ครั้งเดียว
-// browser บล็อกเล่นอัตโนมัติ → แสดงปุ่มให้แตะเล่น
-function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
+// VDO ของข้อ: อยู่ในการ์ดคำถามตลอด เล่นวนซ้ำไปเรื่อย ๆ ไม่บังคับดูจบ — ตัวเลือกโผล่ทันที
+// browser บล็อกเล่นอัตโนมัติ (มีเสียง ยังไม่เคยมี user gesture) → แสดงปุ่มให้แตะเล่น
+function PromptVideo({ src }: { src: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [blocked, setBlocked] = useState(false);
-  const blockedRef = useRef(false);
-  const doneRef = useRef(false);
-  const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
-
-  function finish() {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    onDoneRef.current();
-  }
-
-  function setBlockedBoth(v: boolean) {
-    blockedRef.current = v;
-    setBlocked(v);
-  }
 
   function tryPlay() {
     const v = ref.current;
     if (!v) return;
-    setBlockedBoth(false);
+    setBlocked(false);
     v.play().catch((e: unknown) => {
-      // error อื่น (ไฟล์เสีย/โหลดไม่ได้) จะมา onError ของ <video> เอง
-      if (e instanceof DOMException && e.name === "NotAllowedError") setBlockedBoth(true);
+      // error อื่น (ไฟล์เสีย/โหลดไม่ได้) ปล่อยผ่าน ไม่บล็อกเกม
+      if (e instanceof DOMException && e.name === "NotAllowedError") setBlocked(true);
     });
   }
 
-  // VDO หยุด/จบ/ถูกถอดออก → เอา class ออก แอนิเมชันที่วนไม่หยุดกลับมาเล่นต่อ
-  useEffect(() => () => setVideoPlaying(false), []);
-
+  // เปลี่ยนข้อ (src เปลี่ยน) → เล่นตัวใหม่ทันที · ออกจากข้อนี้ → เอา class ออก แอนิเมชันที่วนไม่หยุดกลับมาเล่นต่อ
   useEffect(() => {
     tryPlay();
-    // เฝ้าดูว่าเวลาใน VDO ขยับไหม — ไม่ขยับนาน = โหลดไม่ขึ้นหรือค้าง (ยกเว้นตอนรอแตะเล่น)
-    let last = -1;
-    let still = 0;
-    const watch = window.setInterval(() => {
-      const v = ref.current;
-      if (!v || blockedRef.current) {
-        still = 0;
-        return;
-      }
-      if (v.currentTime !== last) {
-        last = v.currentTime;
-        still = 0;
-      } else if (++still >= VIDEO_STALL_S) {
-        finish();
-      }
-    }, 1000);
-    return () => window.clearInterval(watch);
+    return () => setVideoPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [src]);
 
   return (
-    <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden bg-black">
+    <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg bg-black">
       <video
         ref={ref}
         src={src}
+        loop
         playsInline
         preload="auto"
         disablePictureInPicture
@@ -182,9 +152,9 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
         onContextMenu={(e) => e.preventDefault()}
         onPlaying={() => setVideoPlaying(true)}
         onPause={() => setVideoPlaying(false)}
-        onEnded={finish}
-        onError={finish}
-        className="h-full max-h-full w-full object-contain"
+        // ครอปเต็มกรอบเสมอ (object-cover) — กรอบขนาดไม่เท่าสัดส่วนวิดีโอ จะไม่มีแถบดำซ้าย-ขวา/บน-ล่าง
+        // object-left: ครอปแล้วยึดฝั่งซ้ายของวิดีโอไว้เสมอ (ส่วนที่โดนตัดออกจะอยู่ขวา)
+        className="h-full w-full object-cover object-left"
       />
       {blocked && (
         <button
@@ -198,9 +168,6 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
           แตะเพื่อเล่น VDO
         </button>
       )}
-      <p className="f1-font-display pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white lg:text-lg">
-        ดู VDO ให้จบ แล้วตัวเลือกจะแสดง
-      </p>
     </div>
   );
 }
@@ -219,15 +186,13 @@ export function PlayPage() {
   const [tries, setTries] = useState<number[]>([]);
   // ตัวเลือกที่ตอบผิดไปแล้วในข้อปัจจุบัน — กดซ้ำไม่ได้
   const [wrongIds, setWrongIds] = useState<string[]>([]);
-  // ป๊อปอัปหลังตอบผิด: ดู VDO ซ้ำ หรือ ตอบใหม่
+  // ป๊อปอัปหลังตอบผิด: ให้ตอบใหม่
   const [retryPrompt, setRetryPrompt] = useState(false);
-  // เพิ่มทุกครั้งที่กดดู VDO ซ้ำ — ใช้เป็น key ให้ VDO เล่นใหม่ตั้งแต่ต้น
-  const [replayN, setReplayN] = useState(0);
   // ตัวเลือกที่เพิ่งกด (ระหว่างหน่วงโชว์ผล) — มีค่า = ล็อกไม่ให้กดซ้ำ
   const [picked, setPicked] = useState<string | null>(null);
-  // VDO ของข้อปัจจุบันเล่นจบแล้วหรือยัง (ข้อที่ไม่มี VDO = true)
-  const [videoDone, setVideoDone] = useState(true);
   const [elapsed, setElapsed] = useState(0);
+  // เวลาที่นับถอยหลังไปแล้วในเฟสจิ๊กซอ (เกมแรก) — แยกจาก elapsed ของเกมตอบคำถาม
+  const [jigsawElapsed, setJigsawElapsed] = useState(0);
   // เอฟเฟกต์ทับหน้าจอ · n เปลี่ยนทุกครั้งให้แอนิเมชันเริ่มใหม่
   const [flash, setFlash] = useState<{ ok: boolean; n: number } | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -296,8 +261,7 @@ export function PlayPage() {
     };
   }, []);
 
-  // เวลาเดินเฉพาะตอนเล่นและไม่ได้ดู VDO (GAMEPLAY.md 3.4 — หยุดชั่วคราวระหว่าง VDO)
-  const clockRunning = phase === "playing" && videoDone;
+  const clockRunning = phase === "playing";
   useEffect(() => {
     if (!clockRunning) return;
     const timer = window.setInterval(() => setElapsed((prev) => prev + 1), 1000);
@@ -309,6 +273,17 @@ export function PlayPage() {
     if (phase === "playing" && limit > 0 && elapsed >= limit) finish(results, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elapsed, phase, limit]);
+
+  const jigsawLimit = game?.jigsawTimeLimitSeconds ?? 0;
+  const jigsawRunning = phase === "jigsaw";
+  useEffect(() => {
+    if (!jigsawRunning) return;
+    const timer = window.setInterval(() => setJigsawElapsed((prev) => prev + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [jigsawRunning]);
+  useEffect(() => {
+    if (phase === "jigsaw" && jigsawElapsed >= jigsawLimit) setPhase("jigsawDone");
+  }, [jigsawElapsed, phase, jigsawLimit]);
 
   if (!game) {
     return (
@@ -331,9 +306,15 @@ export function PlayPage() {
 
   const total = rounds.length;
   const current = rounds[index];
+  // โชว์ overlay เฉลยกลางจอตอนตอบถูก — อยู่พร้อมกันกับช่วงที่ปุ่มตัวเลือกเขียวเด้ง (picked ถูกเคลียร์ตอนไปข้อถัดไป)
+  const pickedCorrectOption = picked ? current?.options.find((o) => o.id === picked && o.correct) : undefined;
   const hasLimit = limit > 0;
   const remaining = hasLimit ? Math.max(0, limit - elapsed) : null;
   const lowTime = remaining !== null && remaining <= LOW_TIME_S;
+  const jigsawRemaining = Math.max(0, jigsawLimit - jigsawElapsed);
+  const jigsawLowTime = jigsawRemaining <= LOW_TIME_S;
+  // จิ๊กซอถูกตั้งเป็นเกมที่สอง (ปิดท้าย) — ไม่มี "เกมถัดไป" ให้ไปต่อแล้วหลังจิ๊กซอรอบนี้จบ
+  const jigsawIsSecondGame = game.firstGame === "quiz" && jigsawLimit > 0;
   const score = results.filter(Boolean).length;
   const playableCount = game.pairs.filter(isPairComplete).length;
   const requiredOf = (n: number) => Math.ceil((n * game.passPercent) / 100);
@@ -355,6 +336,18 @@ export function PlayPage() {
     }, ACK_TIMEOUT_MS);
   }
 
+  // กดเริ่มเกมจากหน้าหลัก: จิ๊กซอเป็นเกมแรก + มีเวลาตั้งไว้ → เข้าเฟสนับถอยหลังก่อน
+  // ไม่งั้น (ข้ามจิ๊กซอ หรือจิ๊กซอถูกตั้งให้เป็นเกมที่สอง) → เข้าเกมตอบคำถามเลย
+  function startFlow() {
+    if (!game) return;
+    if (game.firstGame === "jigsaw" && game.jigsawTimeLimitSeconds > 0) {
+      setJigsawElapsed(0);
+      setPhase("jigsaw");
+      return;
+    }
+    startGame();
+  }
+
   function startGame() {
     if (!game) return;
     const next = makeRounds(game);
@@ -372,7 +365,6 @@ export function PlayPage() {
     setWrongIds([]);
     setRetryPrompt(false);
     setPicked(null);
-    setVideoDone(!next[0]?.pair.video);
     setElapsed(0);
     setFlash(null);
     setSummary(null);
@@ -393,12 +385,20 @@ export function PlayPage() {
     setSummary({ score: s, total, required, passed, timeout, timeUsed: hasLimit ? Math.min(elapsedRef.current, limit) : elapsedRef.current });
     // score ที่ส่ง portal = % ของข้อที่ตอบถูก จำนวนเต็ม 0–100 (STATION_ACTIVITY.md 3.1) — หน้าสรุปยังแสดงเป็นจำนวนข้อ
     report({ result: passed ? "pass" : "fail", score: total > 0 ? Math.round((100 * s) / total) : 0 });
+    // จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) → ส่งผลไป portal ไปแล้วด้านบน (ไม่รอ ack) แล้วค่อยขึ้นนับถอยหลังต่อเองหลังให้เห็นผลแป๊บนึง
+    if (game.firstGame === "quiz" && game.jigsawTimeLimitSeconds > 0) {
+      advanceTimerRef.current = window.setTimeout(() => {
+        advanceTimerRef.current = null;
+        setJigsawElapsed(0);
+        setPhase("jigsaw");
+      }, SECOND_GAME_DELAY_MS);
+    }
   }
 
   // ตอบผิด → เอฟเฟกต์ผิด แล้วเด้งป๊อปอัปให้เลือกดู VDO ซ้ำ/ตอบใหม่ · อยู่ข้อเดิมจนกว่าจะตอบถูก
   // ตอบถูก → เอฟเฟกต์ถูก แล้วไปข้อถัดไป (ได้คะแนนข้อนี้ ไม่ว่าจะตอบกี่ครั้ง)
   function choose(option: AnswerOption) {
-    if (phase !== "playing" || picked || retryPrompt || !videoDone || !current) return;
+    if (phase !== "playing" || picked || retryPrompt || !current) return;
     if (wrongIds.includes(option.id)) return;
     const ok = Boolean(option.correct);
     setPicked(option.id);
@@ -424,7 +424,6 @@ export function PlayPage() {
       setIndex(index + 1);
       setPicked(null);
       setWrongIds([]);
-      setVideoDone(!rounds[index + 1].pair.video);
     }, REVEAL_MS);
   }
 
@@ -440,20 +439,17 @@ export function PlayPage() {
     setPicked(null);
     setRetryPrompt(false);
     setElapsed(0);
+    setJigsawElapsed(0);
     setPhase("idle");
   }
 
-  function replayVideo() {
-    setRetryPrompt(false);
-    setReplayN((n) => n + 1);
-    setVideoDone(false);
-  }
-
   function renderPrompt(pair: MatchPair) {
-    const hasImg = pair.promptType !== "text" && Boolean(pair.promptImage);
+    const hasVideo = Boolean(pair.video);
+    const hasImg = !hasVideo && pair.promptType !== "text" && Boolean(pair.promptImage);
     const hasText = Boolean(pair.promptText.trim());
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 sm:gap-3 lg:gap-4">
+        {hasVideo && <PromptVideo src={pair.video!} />}
         {hasImg && (
           <img
             src={pair.promptImage}
@@ -483,7 +479,8 @@ export function PlayPage() {
     const hasImg = option.type !== "text" && Boolean(option.image);
     return (
       // กรอบนอกเล่นแอนิเมชันโผล่ทีละใบ · ปุ่มข้างในเล่นกดยุบ/เยลลี่/สั่น (แยกกันไม่ให้ animation ทับกันแล้วเล่นซ้ำ)
-      <div key={option.id} className="f1-option-in flex min-h-0 min-w-0" style={{ animationDelay: `${i * 80}ms` }}>
+      // flex-1: เรียงแนวตั้งฝั่งขวา แบ่งพื้นที่เท่ากันทุกตัวเลือก
+      <div key={option.id} className="f1-option-in flex min-h-0 min-w-0 flex-1" style={{ animationDelay: `${i * 80}ms` }}>
         <button
           type="button"
           disabled={revealing || retryPrompt || eliminated}
@@ -567,9 +564,15 @@ export function PlayPage() {
               <p className="text-xs font-medium tracking-widest text-f1-brand-ink lg:text-lg">START LINE</p>
               <p className="text-3xl font-bold text-f1-ink lg:text-5xl">พร้อมออกตัว?</p>
               <ul className="space-y-1 text-left text-base text-f1-ink-2 lg:space-y-2 lg:text-xl">
+                {jigsawLimit > 0 && game.firstGame === "jigsaw" && (
+                  <li>• เริ่มจากต่อจิ๊กซอ {formatTime(jigsawLimit)} ก่อน แล้วค่อยเข้าเกมตอบคำถาม</li>
+                )}
+                {jigsawLimit > 0 && game.firstGame === "quiz" && (
+                  <li>• ตอบคำถามให้จบก่อน แล้วจะมีต่อจิ๊กซออีก {formatTime(jigsawLimit)} ปิดท้าย</li>
+                )}
                 <li>• คำถามทั้งหมด {playableCount} ข้อ เลือกคำตอบที่ถูกข้อละ 1 ตัว</li>
-                <li>• ต้องตอบให้ถูกถึงจะไปข้อถัดไป ตอบผิดเลือกได้ว่าจะดู VDO ซ้ำหรือตอบใหม่เลย</li>
-                <li>• ข้อที่มี VDO ต้องดูให้จบก่อน ตัวเลือกถึงจะแสดง (ระหว่างดู VDO เวลาหยุด)</li>
+                <li>• ต้องตอบให้ถูกถึงจะไปข้อถัดไป ตอบผิดได้ตอบใหม่เรื่อย ๆ</li>
+                <li>• ข้อที่มี VDO ประกอบ จะเล่นวนให้ดูตลอดโดยไม่ต้องรอ</li>
                 <li>
                   {limit > 0 ? (
                     <>
@@ -583,7 +586,7 @@ export function PlayPage() {
               <Button
                 size="lg"
                 className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-on-brand hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
-                onClick={startGame}
+                onClick={startFlow}
               >
                 <Flag className="lg:size-8" /> เริ่มเกม
               </Button>
@@ -591,85 +594,122 @@ export function PlayPage() {
           </div>
         )}
 
-        {phase !== "idle" && current && (
-          <>
-            {/* ความคืบหน้า: จุดละข้อ (เขียว = ถูก · แดง = ผิด · ขอบเหลือง = ข้อปัจจุบัน) */}
-            <div className="flex shrink-0 flex-wrap items-center justify-center gap-1.5 lg:gap-2.5" aria-hidden>
-              {rounds.map((r, i) => {
-                const isCurrent = i === index && phase === "playing";
-                return (
-                  <span
-                    key={r.pair.id}
-                    className={cn(
-                      // ข้อปัจจุบันยาวกว่า · ข้อที่เพิ่งตอบถูกเด้ง
-                      "f1-dot h-2 rounded-full lg:h-3",
-                      isCurrent ? "w-10 sm:w-14 lg:w-20" : "w-6 sm:w-8 lg:w-12",
-                      i < results.length ? (results[i] ? "bg-[#15803D]" : "bg-f1-wrong") : isCurrent ? "bg-f1-brand" : "bg-zinc-300",
-                      isCurrent && "shadow-[0_0_0.75rem_rgba(245,196,0,0.8)]",
-                      i === results.length - 1 && "f1-dot-pop",
-                    )}
-                  />
-                );
-              })}
+        {phase === "jigsaw" && (
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto">
+            <div className="f1-font-display f1-pop-in-spring w-full max-w-lg space-y-4 rounded-2xl border-2 border-f1-line bg-white p-6 text-center shadow-md lg:max-w-3xl lg:space-y-6 lg:rounded-3xl lg:border-4 lg:p-10">
+              <p className="text-xs font-medium tracking-widest text-f1-brand-ink lg:text-lg">JIGSAW</p>
+              <p className="text-2xl font-bold text-f1-ink lg:text-4xl">กำลังต่อจิ๊กซอ…</p>
+              <p
+                className={cn(
+                  "f1-font-mono text-6xl font-bold tabular-nums leading-none text-f1-ink lg:text-9xl",
+                  jigsawLowTime && "f1-timer-blink text-f1-wrong-bright",
+                )}
+              >
+                {formatTime(jigsawRemaining)}
+              </p>
             </div>
+          </div>
+        )}
 
-            {/* key ตามข้อ: เปลี่ยนข้อทีไรการ์ดคำถามเลื่อนเข้าแล้วเด้งใหม่ */}
+        {phase === "jigsawDone" && (
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto">
+            <div className="f1-font-display f1-pop-in-spring w-full max-w-lg space-y-4 rounded-2xl border-2 border-f1-line bg-white p-6 text-center shadow-md lg:max-w-3xl lg:space-y-6 lg:rounded-3xl lg:border-4 lg:p-10">
+              <p className="text-3xl font-bold text-f1-wrong lg:text-5xl">หมดเวลาแล้ว</p>
+              {jigsawIsSecondGame ? (
+                // จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) — จบกิจกรรมแล้ว ไม่มีเกมถัดไป
+                embedded ? (
+                  <p className="text-lg text-f1-mute lg:text-2xl">
+                    {summary?.passed ? "ผ่านแล้ว — จอจะไปสถานีถัดไปเอง" : "จอจะโหลดเกมใหม่ให้ลองอีกครั้ง"}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-lg text-f1-ink-2 lg:text-2xl">จบกิจกรรมแล้ว</p>
+                    <Button
+                      size="lg"
+                      className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-on-brand hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
+                      onClick={goHome}
+                    >
+                      <Home className="lg:size-8" /> กลับไปหน้าหลัก
+                    </Button>
+                  </>
+                )
+              ) : (
+                <>
+                  <p className="text-lg text-f1-ink-2 lg:text-2xl">เริ่มเกมถัดไปหรือไม่</p>
+                  <Button
+                    size="lg"
+                    className="f1-glow f1-press h-14 w-full bg-f1-brand text-xl font-bold text-f1-on-brand hover:bg-f1-brand-dark lg:h-20 lg:rounded-xl lg:text-3xl"
+                    onClick={startGame}
+                  >
+                    <Flag className="lg:size-8" /> เริ่มเกมถัดไป
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* โชว์การ์ดคำถามตอน "playing" (เล่นอยู่) และ "finished" (ให้เห็นเลือนรางหลัง modal สรุปผล) เท่านั้น
+            ไม่ใช่ตอน "jigsaw"/"jigsawDone" — ไม่งั้นการ์ดข้อสุดท้ายค้างโผล่ใต้การ์ดนับถอยหลัง */}
+        {(phase === "playing" || phase === "finished") && current && (
+          <div className="flex min-h-0 flex-1 gap-2 sm:gap-3 lg:gap-5">
+            {/* key ตามข้อ: เปลี่ยนข้อทีไรการ์ดคำถามเลื่อนเข้าแล้วเด้งใหม่ · ซ้าย = โจทย์ (วิดีโอ/รูป/ข้อความ) ขวา = ตัวเลือกเรียงแนวตั้ง */}
             <section
               key={`${roundId}:${index}`}
-              className={cn(
-                "f1-q-enter flex min-h-0 flex-[3] flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4 lg:gap-3 lg:rounded-3xl lg:border-2 lg:p-6",
-              )}
+              className="f1-q-enter flex min-h-0 flex-1 flex-col gap-2 rounded-2xl border border-f1-line bg-white p-3 shadow-sm sm:p-4 lg:gap-3 lg:rounded-3xl lg:border-2 lg:p-6"
             >
               <p className="f1-font-mono shrink-0 text-xs font-bold tracking-widest text-f1-brand-ink sm:text-base lg:text-xl">
                 ข้อ {index + 1} / {total}
               </p>
-              {renderPrompt(current.pair)}
+              <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row lg:gap-6">
+                <div className="flex min-h-0 flex-[3] flex-col">{renderPrompt(current.pair)}</div>
+                <div className="flex min-h-0 flex-[2] flex-col gap-2 overflow-y-auto sm:gap-3 lg:gap-4">
+                  {current.options.map(renderOption)}
+                </div>
+              </div>
             </section>
 
-            {videoDone && (
-              <section
-                className={cn(
-                  "grid min-h-0 flex-[2] auto-rows-fr gap-2 sm:gap-3 lg:gap-5",
-                  current.options.length > 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2",
-                )}
-              >
-                {current.options.map(renderOption)}
-              </section>
-            )}
-          </>
+            {/* เส้นทางข้อ: ธงเช็กพอยต์ไล่จากบนลงล่าง 1 ธงต่อข้อ มีเลขข้อกำกับ
+                (เขียว = ถูก · แดง = ผิด · ธงสีแบรนด์เรืองเหลือง = ข้อปัจจุบัน · เทา = ยังไม่ถึง) */}
+            <aside
+              className="relative flex w-10 shrink-0 flex-col items-center justify-between py-1 sm:w-14 sm:py-2 lg:w-20 lg:py-3"
+              aria-hidden
+            >
+              <div className="pointer-events-none absolute inset-y-2 left-1/2 border-l-2 border-dashed border-f1-line lg:inset-y-3 lg:border-l-[3px]" />
+              {rounds.map((r, i) => {
+                const isCurrent = i === index && phase === "playing";
+                const answered = i < results.length;
+                return (
+                  <div key={r.pair.id} className="relative z-10 shrink-0">
+                    <span
+                      className={cn(
+                        // ข้อปัจจุบันใหญ่กว่า · ข้อที่เพิ่งตอบถูกเด้ง · ring สีพื้นหน้า ตัดเส้นทางด้านหลังออกรอบธง
+                        "f1-dot flex items-center justify-center rounded-full ring-4 ring-f1-paper lg:ring-[6px]",
+                        isCurrent ? "size-9 sm:size-11 lg:size-14" : "size-6 sm:size-7 lg:size-10",
+                        answered ? (results[i] ? "bg-[#15803D]" : "bg-f1-wrong") : isCurrent ? "bg-f1-brand" : "bg-zinc-300",
+                        isCurrent && "shadow-[0_0_0.75rem_rgba(245,196,0,0.8)]",
+                        i === results.length - 1 && "f1-dot-pop",
+                      )}
+                    >
+                      <Flag
+                        className={cn(
+                          answered || isCurrent ? "text-white" : "text-zinc-500",
+                          isCurrent ? "size-4 sm:size-5 lg:size-7" : "size-3 sm:size-3.5 lg:size-5",
+                        )}
+                        fill="currentColor"
+                      />
+                    </span>
+                    {/* ป้ายเลขข้อมุมขวาล่างของธง */}
+                    <span className="f1-font-mono absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border border-f1-line bg-white text-[0.6rem] font-bold leading-none text-f1-ink sm:size-5 sm:text-xs lg:size-6 lg:text-sm">
+                      {i + 1}
+                    </span>
+                  </div>
+                );
+              })}
+            </aside>
+          </div>
         )}
       </main>
-
-      {/* VDO ของข้อ: หน้าต่างเต็มจอตรงกลาง ดูจบแล้วปิดเอง แล้วตัวเลือกเด้งขึ้น
-          ฝังใน portal → เว้นขอบล่างให้ปุ่มของ portal ไม่ทับภาพ */}
-      {phase === "playing" && current?.pair.video && !videoDone && (
-        <div
-          className={cn("f1-fade-in fixed inset-0 z-50 flex flex-col gap-2 bg-black px-2 pt-2 lg:gap-4 lg:px-4 lg:pt-4",
-            embedded ? PORTAL_BOTTOM_GAP : "pb-2 lg:pb-4",
-          )}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`VDO ข้อ ${index + 1}`}
-        >
-          <div className="f1-font-display flex shrink-0 items-baseline justify-center gap-3 px-2 text-center text-white lg:gap-5">
-            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand-bright sm:text-lg lg:text-2xl">
-              ข้อ {index + 1} / {total}
-            </span>
-            {current.pair.promptText.trim() && (
-              <span className="line-clamp-2 text-lg font-bold sm:text-2xl lg:text-4xl">{current.pair.promptText}</span>
-            )}
-          </div>
-          <div className="f1-pop-in-spring flex min-h-0 flex-1 overflow-hidden rounded-lg lg:rounded-2xl">
-            <QuestionVideo key={`${roundId}:${index}:${replayN}`} src={current.pair.video} onDone={() => setVideoDone(true)} />
-          </div>
-        </div>
-      )}
-
-      {/* โหลด VDO ข้อถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ข้อเดียว) — ถึงข้อนั้นเริ่มเล่นทันที ไม่ต้องรอบัฟเฟอร์
-          ทำเฉพาะตอน VDO ข้อนี้จบแล้ว จะได้ไม่แย่งตัวถอดรหัส/เน็ตกับ VDO ที่กำลังเล่น */}
-      {phase === "playing" && videoDone && rounds[index + 1]?.pair.video && (
-        <video key={rounds[index + 1].pair.video} src={rounds[index + 1].pair.video} preload="auto" muted playsInline className="hidden" aria-hidden />
-      )}
 
       {flash && (
         <div
@@ -677,6 +717,24 @@ export function PlayPage() {
           className={cn("pointer-events-none fixed inset-0 z-[55]", flash.ok ? "f1-checkered-flash" : "f1-redflag-flash")}
           aria-hidden
         />
+      )}
+
+      {/* เฉลยคำตอบที่ถูกแบบ overlay กลางจอ — โผล่พร้อมกันกับช่วงปุ่มเขียวเด้ง แล้วหายไปเองตอนเปลี่ยนข้อ */}
+      {pickedCorrectOption && (
+        <div key={pickedCorrectOption.id} className="pointer-events-none fixed inset-0 z-[56] flex items-center justify-center p-4">
+          <div className="f1-pop-in-spring flex max-w-xs flex-col items-center gap-2 rounded-2xl border-2 border-[#15803D] bg-white px-6 py-5 text-center shadow-xl sm:max-w-sm sm:gap-3 sm:px-10 sm:py-7 lg:max-w-md lg:rounded-3xl lg:border-4 lg:px-14 lg:py-9">
+            <span className="flex size-14 items-center justify-center rounded-full bg-[#15803D] text-white shadow-md sm:size-20 lg:size-24">
+              <ThumbsUp className="f1-icon-pop size-8 sm:size-12 lg:size-14" strokeWidth={2.5} fill="currentColor" />
+            </span>
+            <p className="f1-font-display text-xl font-bold text-[#15803D] sm:text-3xl lg:text-4xl">เยี่ยมมาก! ถูกต้อง</p>
+            {pickedCorrectOption.type !== "text" && pickedCorrectOption.image && (
+              <img src={pickedCorrectOption.image} alt="" draggable={false} className="max-h-24 rounded-lg object-contain sm:max-h-32 lg:max-h-40" />
+            )}
+            {pickedCorrectOption.text && (
+              <p className="line-clamp-3 text-sm font-bold leading-snug text-f1-ink sm:text-lg lg:text-xl">{pickedCorrectOption.text}</p>
+            )}
+          </div>
+        </div>
       )}
 
       {retryPrompt && current && phase === "playing" && (
@@ -696,38 +754,24 @@ export function PlayPage() {
             <p id="retry-title" className="mt-3 text-3xl font-bold lg:mt-5 lg:text-5xl">
               ยังไม่ถูก ลองอีกครั้ง!
             </p>
-            <p className="mt-1 text-base text-f1-mute lg:mt-3 lg:text-2xl">
-              {current.pair.video
-                ? "ต้องตอบข้อนี้ให้ถูกก่อนถึงจะไปข้อถัดไปได้ — อยากดู VDO อีกรอบไหม?"
-                : "ต้องตอบข้อนี้ให้ถูกก่อนถึงจะไปข้อถัดไปได้"}
-            </p>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center lg:mt-8 lg:gap-4">
-              {current.pair.video && (
-                <Button className="f1-press h-12 bg-f1-brand text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl" onClick={replayVideo}>
-                  <Play className="lg:size-7" /> ดู VDO อีกครั้ง
-                </Button>
-              )}
+            <p className="mt-1 text-base text-f1-mute lg:mt-3 lg:text-2xl">ต้องตอบข้อนี้ให้ถูกก่อนถึงจะไปข้อถัดไปได้</p>
+            <div className="mt-5 flex justify-center lg:mt-8">
               <Button
-                variant={current.pair.video ? "outline" : "default"}
                 autoFocus
-                className={cn(
-                  "f1-press h-12 text-lg lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl",
-                  current.pair.video
-                    ? "border-f1-brand bg-white text-f1-brand-ink hover:bg-f1-brand/10"
-                    : "bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark",
-                )}
+                className="f1-press h-12 bg-f1-brand text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-8 lg:text-2xl"
                 onClick={() => setRetryPrompt(false)}
               >
-                <RotateCcw className="lg:size-7" /> {current.pair.video ? "ไม่ดู ตอบใหม่เลย" : "ตอบใหม่"}
+                <RotateCcw className="lg:size-7" /> ตอบใหม่
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {summary?.passed && <Confetti />}
+      {/* summary ไม่เคลียร์ทันทีตอนจิ๊กซอเป็นเกมที่สอง (เอาไว้ให้หน้าจิ๊กซอขึ้น pass/fail ต่อได้) — โชว์ modal/confetti นี้เฉพาะตอนยังอยู่ phase "finished" จริง ๆ */}
+      {phase === "finished" && summary?.passed && <Confetti />}
 
-      {summary && (
+      {phase === "finished" && summary && (
         <div
           className={cn(
             "f1-backdrop-fade fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/60 p-4",
@@ -839,7 +883,8 @@ export function PlayPage() {
               </p>
             )}
 
-            {!embedded && (
+            {/* จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) → ไม่ต้องมีปุ่มตรงนี้ จะขึ้นนับถอยหลังต่อเอง (ดู finish()) */}
+            {!embedded && !jigsawIsSecondGame && (
               <div className="f1-rise-in mt-5 flex justify-center [animation-delay:900ms] lg:mt-8">
                 {/* ผ่าน → กลับหน้าหลัก (หน้าเริ่มเกม) · ไม่ผ่าน → เล่นใหม่ทันที */}
                 {summary.passed ? (

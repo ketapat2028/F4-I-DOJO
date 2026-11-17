@@ -32,15 +32,6 @@ const VIDEO_DIR = path.join(__dirname, 'videos');
 fs.mkdirSync(VIDEO_DIR, { recursive: true });
 app.use('/api/videos', express.static(VIDEO_DIR, { maxAge: '365d', immutable: true }));
 
-// งานที่แก้ข้อมูล (บันทึกชุดคำถาม, อัปโหลดรูป, เขียน/ลบ records, app-config) ต้องส่ง header x-admin-secret ตรงกับ ADMIN_SECRET
-function requireAdmin(req, res, next) {
-  const secret = req.headers['x-admin-secret'];
-  if (!process.env.ADMIN_SECRET || !secret || secret !== process.env.ADMIN_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-}
-
 // ========== Multer config ==========
 // เก็บไฟล์ไว้ใน memory แล้วค่อยเขียนลง DB (ตาราง images) ไม่เขียนลงดิสก์แล้ว
 // content-type ที่เสิร์ฟกลับกำหนดจากนามสกุลเอง ไม่เชื่อ mimetype ที่ browser ส่งมา (กันเก็บ text/html แล้วเสิร์ฟจาก origin เรา)
@@ -181,7 +172,7 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
-app.post('/api/records', requireAdmin, async (req, res) => {
+app.post('/api/records', async (req, res) => {
   const { title, detail } = req.body;
   if (!title) {
     return res.status(400).json({ error: 'title is required' });
@@ -200,7 +191,7 @@ app.post('/api/records', requireAdmin, async (req, res) => {
   }
 });
 
-app.delete('/api/records', requireAdmin, async (req, res) => {
+app.delete('/api/records', async (req, res) => {
   try {
     await query('DELETE FROM records');
     res.json({ ok: true });
@@ -210,7 +201,7 @@ app.delete('/api/records', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/upload', requireAdmin, uploadImageField, async (req, res) => {
+app.post('/api/upload', uploadImageField, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file' });
   try {
     const id = crypto.randomUUID();
@@ -225,15 +216,9 @@ app.post('/api/upload', requireAdmin, uploadImageField, async (req, res) => {
   }
 });
 
-// requireAdmin มาก่อน multer — รหัสผิดจะไม่มีไฟล์ถูกเขียนลงดิสก์
-app.post('/api/upload-video', requireAdmin, uploadVideoField, (req, res) => {
+app.post('/api/upload-video', uploadVideoField, (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no file' });
   res.json({ filename: req.file.filename });
-});
-
-// ให้หน้า editor ตรวจรหัสผู้ดูแลก่อนเริ่มแก้
-app.get('/api/admin/check', requireAdmin, (req, res) => {
-  res.json({ ok: true });
 });
 
 // อ่านได้โดยไม่ต้องใช้รหัส — หน้าเกมบนจอ Station ต้องโหลดรูปเอง
@@ -261,14 +246,18 @@ app.get('/api/game', async (req, res) => {
   }
 });
 
-app.put('/api/game', requireAdmin, async (req, res) => {
-  const { name, timeLimitSeconds, passPercent, brandColor, pairs } = req.body || {};
+app.put('/api/game', async (req, res) => {
+  const { name, jigsawTimeLimitSeconds, firstGame, timeLimitSeconds, passPercent, brandColor, pairs } = req.body || {};
   if (!Array.isArray(pairs) || pairs.length < 2) {
     return res.status(400).json({ error: 'ต้องมีอย่างน้อย 2 คู่' });
   }
   try {
     const json = JSON.stringify({
       name: typeof name === 'string' ? name : '',
+      // เกมจิ๊กซอนอกเว็บ นับถอยหลังเฉย ๆ · 0 = ข้ามเฟสนี้
+      jigsawTimeLimitSeconds: Number.isFinite(jigsawTimeLimitSeconds) ? Math.max(0, jigsawTimeLimitSeconds) : 0,
+      // เกมไหนเล่นก่อน: จิ๊กซอก่อน (เดิม) หรือเกมนี้ก่อนแล้วจิ๊กซอปิดท้าย
+      firstGame: firstGame === 'quiz' ? 'quiz' : 'jigsaw',
       timeLimitSeconds: Number.isFinite(timeLimitSeconds) ? Math.max(0, timeLimitSeconds) : 0,
       // เกณฑ์ผ่าน (% ของจำนวนข้อ) — ไม่ส่งมา frontend ใช้ค่าเริ่มต้น 70
       ...(Number.isFinite(passPercent) ? { passPercent: Math.min(100, Math.max(1, Math.round(passPercent))) } : {}),
@@ -299,7 +288,7 @@ app.get('/api/app-config', async (req, res) => {
   }
 });
 
-app.post('/api/app-config', requireAdmin, async (req, res) => {
+app.post('/api/app-config', async (req, res) => {
   try {
     const json = JSON.stringify(req.body);
     await query(
