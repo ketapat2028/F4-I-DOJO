@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Film, FolderOpen, Lock, TriangleAlert, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, Film, FolderOpen, Palette, TriangleAlert, Wrench } from "lucide-react";
 import { useNavigate } from "react-router";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme";
+import { applyBrandColor, applyCachedBrandColor, BRAND_PRESETS, DEFAULT_BRAND_COLOR, normalizeHex } from "../utils/brandColor";
 import { fileToUploadableImage } from "../utils/image";
 import {
   checkImageFile,
@@ -19,37 +20,16 @@ import {
   readLegacyLocalGame,
   saveGame,
   sideComplete,
-  UnauthorizedError,
   uploadImage,
   uploadVideo,
   VIDEO_EXTS,
   VIDEO_MAX_MB,
-  verifyAdmin,
 } from "../utils/gameStore";
 import { inspectVideo } from "../utils/videoCheck";
 import { canConvertVideo, ConvertCanceled, convertForPi, convertUnavailableReason, formatMB } from "../utils/videoConvert";
 
 const MIN_PAIRS = 2;
 const MIN_ANSWERS = 2;
-// รหัสผู้ดูแลเก็บไว้แค่ใน tab นี้ ปิด tab แล้วต้องใส่ใหม่
-const SECRET_KEY = "idojo.adminSecret";
-
-function readSecret(): string {
-  try {
-    return sessionStorage.getItem(SECRET_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeSecret(value: string) {
-  try {
-    if (value) sessionStorage.setItem(SECRET_KEY, value);
-    else sessionStorage.removeItem(SECRET_KEY);
-  } catch {
-    // ไม่มี sessionStorage ก็ใช้แค่ใน state
-  }
-}
 
 function errorText(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message : fallback;
@@ -89,7 +69,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
             type="button"
             onClick={() => onType(t)}
             className={`f1-font-display rounded-sm border px-3 py-1 text-xs font-medium ${
-              type === t ? "border-f1-brand bg-f1-brand text-f1-ink" : "border-f1-line bg-white text-zinc-700"
+              type === t ? "border-f1-brand bg-f1-brand text-f1-on-brand" : "border-f1-line bg-white text-zinc-700"
             }`}
           >
             {TYPE_LABEL[t]}
@@ -130,7 +110,7 @@ function SideFields({ title, type, text, image, onType, onText, onImage, onUploa
               type="button"
               size="sm"
               disabled={uploading}
-              className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+              className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
               onClick={() => fileRef.current?.click()}
             >
               <FolderOpen /> เลือกรูปจากเครื่อง
@@ -291,7 +271,7 @@ function VideoField({ title, video, onVideo, onUpload }: VideoFieldProps) {
           type="button"
           size="sm"
           disabled={busy}
-          className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+          className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
           onClick={() => fileRef.current?.click()}
         >
           <FolderOpen /> เลือก VDO จากเครื่อง
@@ -382,9 +362,6 @@ function VideoField({ title, video, onVideo, onUpload }: VideoFieldProps) {
 
 export function EditPage() {
   const navigate = useNavigate();
-  const [secret, setSecret] = useState<string>(readSecret);
-  const [secretInput, setSecretInput] = useState("");
-  const [checkingSecret, setCheckingSecret] = useState(false);
   const [game, setGame] = useState<Theme | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -393,7 +370,7 @@ export function EditPage() {
   const importFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!secret || game) return;
+    if (game) return;
     getGame()
       .then(setGame)
       .catch((e) => {
@@ -410,40 +387,20 @@ export function EditPage() {
           setNotice("server ยังไม่มีชุดคำถาม — เริ่มจากชุดตัวอย่าง F1 แก้แล้วกดอัปโหลด");
         }
       });
-  }, [secret, game]);
+  }, [game]);
+
+  // ดูตัวอย่างสีธีมทันทีที่เลือก (ยังไม่ cache) — ออกจากหน้าโดยไม่บันทึกจะกลับเป็นสีเดิม
+  const brandColor = game?.brandColor;
+  useEffect(() => {
+    if (game) applyBrandColor(brandColor, false);
+  }, [brandColor, !!game]);
+  useEffect(() => () => applyCachedBrandColor(), []);
 
   useEffect(() => {
     if (!status) return;
     const t = setTimeout(() => setStatus(null), 3500);
     return () => clearTimeout(t);
   }, [status]);
-
-  function forgetSecret(message: string) {
-    writeSecret("");
-    setSecret("");
-    setStatus(null);
-    setLoadError(message);
-  }
-
-  async function handleSubmitSecret() {
-    const value = secretInput.trim();
-    if (!value) return;
-    setCheckingSecret(true);
-    try {
-      if (await verifyAdmin(value)) {
-        writeSecret(value);
-        setSecret(value);
-        setSecretInput("");
-        setLoadError(null);
-      } else {
-        setLoadError("รหัสผู้ดูแลไม่ถูกต้อง");
-      }
-    } catch (e) {
-      setLoadError(errorText(e, "ตรวจรหัสไม่สำเร็จ"));
-    } finally {
-      setCheckingSecret(false);
-    }
-  }
 
   async function handleUploadImage(file: File): Promise<string | undefined> {
     const invalid = checkImageFile(file);
@@ -452,68 +409,21 @@ export function EditPage() {
       return undefined;
     }
     try {
-      return await uploadImage(await fileToUploadableImage(file), secret);
+      return await uploadImage(await fileToUploadableImage(file));
     } catch (e) {
-      if (e instanceof UnauthorizedError) forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
-      else setStatus(errorText(e, "อัปโหลดรูปไม่สำเร็จ"));
+      setStatus(errorText(e, "อัปโหลดรูปไม่สำเร็จ"));
       return undefined;
     }
   }
 
   async function handleUploadVideo(file: File, onProgress: (percent: number) => void): Promise<string | undefined> {
     try {
-      return await uploadVideo(file, secret, onProgress);
+      return await uploadVideo(file, onProgress);
     } catch (e) {
-      if (e instanceof UnauthorizedError) forgetSecret("รหัสผู้ดูแลหมดอายุหรือไม่ถูกต้อง ใส่ใหม่อีกครั้ง");
-      else setStatus(errorText(e, "อัปโหลด VDO ไม่สำเร็จ"));
+      setStatus(errorText(e, "อัปโหลด VDO ไม่สำเร็จ"));
       return undefined;
     }
   }
-
-  if (!secret) {
-    return (
-      <div className="f1-paper-bg min-h-screen">
-        <F1Header />
-        <main className="mx-auto max-w-md space-y-3 p-6">
-          <h1 className="f1-font-display flex items-center gap-2 text-2xl font-bold text-f1-ink">
-            <Lock className="size-6 text-f1-brand-ink" /> EDIT MODE
-          </h1>
-          <form
-            className="space-y-3 rounded-sm border-2 border-f1-line bg-white/90 p-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmitSecret();
-            }}
-          >
-            <label className="block space-y-1 text-sm text-zinc-700">
-              <span>รหัสผู้ดูแล</span>
-              <Input
-                type="password"
-                autoFocus
-                value={secretInput}
-                onChange={(e) => setSecretInput(e.target.value)}
-                className="border-[#8B8B95] bg-white text-f1-ink"
-              />
-            </label>
-            {loadError && <p className="text-sm text-f1-bad">{loadError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" className="border-f1-line text-f1-ink" onClick={() => navigate("/")}>
-                กลับไปเล่น
-              </Button>
-              <Button
-                type="submit"
-                disabled={checkingSecret || !secretInput.trim()}
-                className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
-              >
-                {checkingSecret ? "กำลังตรวจ..." : "เข้าสู่ EDIT MODE"}
-              </Button>
-            </div>
-          </form>
-        </main>
-      </div>
-    );
-  }
-
 
   if (!game) {
     return (
@@ -630,7 +540,8 @@ export function EditPage() {
     }
     setSaving(true);
     try {
-      await saveGame(game, secret);
+      await saveGame(game);
+      applyBrandColor(game.brandColor);
       navigate("/");
     } catch (e) {
       setStatus(errorText(e, "อัปโหลดไม่สำเร็จ"));
@@ -688,6 +599,47 @@ export function EditPage() {
             />
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
+            <span>เวลาต่อจิ๊กซอ (วินาที, 0 = ข้ามเฟสนี้)</span>
+            <Input
+              type="number"
+              min={0}
+              value={game.jigsawTimeLimitSeconds}
+              onChange={(e) =>
+                setGame({ ...game, jigsawTimeLimitSeconds: Math.max(0, Number(e.target.value) || 0) })
+              }
+              className="border-[#8B8B95] bg-white text-f1-ink"
+            />
+            <span className="block text-xs text-f1-mute">
+              {game.firstGame === "quiz"
+                ? "นับถอยหลังปิดท้าย หลังตอบคำถามจบแล้ว (เล่นเกมจิ๊กซอจริงนอกเว็บ)"
+                : "กดเริ่มเกมแล้วนับถอยหลังช่วงนี้ก่อน (เล่นเกมจิ๊กซอจริงนอกเว็บ) ค่อยเข้าเกมตอบคำถาม"}
+            </span>
+          </label>
+          <div className="space-y-1 text-sm text-zinc-700 sm:col-span-2">
+            <span>เกมไหนเล่นก่อน</span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setGame({ ...game, firstGame: "jigsaw" })}
+                className={`f1-font-display rounded-sm border px-3 py-1.5 text-xs font-medium ${
+                  game.firstGame === "jigsaw" ? "border-f1-brand bg-f1-brand text-f1-on-brand" : "border-f1-line bg-white text-zinc-700"
+                }`}
+              >
+                จิ๊กซอก่อน แล้วค่อยตอบคำถาม
+              </button>
+              <button
+                type="button"
+                onClick={() => setGame({ ...game, firstGame: "quiz" })}
+                className={`f1-font-display rounded-sm border px-3 py-1.5 text-xs font-medium ${
+                  game.firstGame === "quiz" ? "border-f1-brand bg-f1-brand text-f1-on-brand" : "border-f1-line bg-white text-zinc-700"
+                }`}
+              >
+                ตอบคำถามก่อน แล้วค่อยต่อจิ๊กซอ
+              </button>
+            </div>
+            <span className="block text-xs text-f1-mute">ใช้ไม่ได้ถ้าเวลาต่อจิ๊กซอ = 0 (ข้ามเฟสจิ๊กซอไปเลยทุกกรณี)</span>
+          </div>
+          <label className="space-y-1 text-sm text-zinc-700">
             <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด)</span>
             <Input
               type="number"
@@ -718,6 +670,63 @@ export function EditPage() {
               {game.pairs.filter(isPairComplete).length} ข้อ
             </span>
           </label>
+          <div className="space-y-2 text-sm text-zinc-700 sm:col-span-2">
+            <span className="flex items-center gap-1.5">
+              <Palette className="size-4 text-f1-brand-ink" /> สีธีม
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {BRAND_PRESETS.map((p) => {
+                const active = (game.brandColor ?? DEFAULT_BRAND_COLOR) === p.color;
+                return (
+                  <button
+                    key={p.color}
+                    type="button"
+                    title={p.name}
+                    aria-label={`สีธีม ${p.name}`}
+                    aria-pressed={active}
+                    onClick={() => setGame({ ...game, brandColor: p.color })}
+                    className={`flex items-center gap-1.5 rounded-full border-2 py-1 pl-1 pr-3 text-xs ${
+                      active ? "border-f1-ink bg-zinc-100 font-bold text-f1-ink" : "border-f1-line bg-white"
+                    }`}
+                  >
+                    <span className="size-5 rounded-full border border-black/15" style={{ backgroundColor: p.color }} />
+                    {p.name}
+                  </button>
+                );
+              })}
+              <label className="flex items-center gap-1.5 rounded-full border-2 border-f1-line bg-white py-1 pl-1 pr-2 text-xs">
+                <input
+                  type="color"
+                  aria-label="เลือกสีเอง"
+                  value={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  onChange={(e) => setGame({ ...game, brandColor: e.target.value })}
+                  className="size-6 cursor-pointer rounded-full border-0 bg-transparent p-0"
+                />
+                <span>สีเอง</span>
+                <Input
+                  key={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  defaultValue={game.brandColor ?? DEFAULT_BRAND_COLOR}
+                  onBlur={(e) => {
+                    const hex = normalizeHex(e.target.value);
+                    if (hex) setGame({ ...game, brandColor: hex });
+                    else e.target.value = game.brandColor ?? DEFAULT_BRAND_COLOR;
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                  aria-label="รหัสสี hex"
+                  className="f1-font-mono h-7 w-24 border-[#8B8B95] bg-white px-2 text-xs text-f1-ink"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-f1-mute">ตัวอย่าง:</span>
+              <span className="f1-font-display rounded-md bg-f1-brand px-3 py-1 text-sm font-bold text-f1-on-brand">ปุ่มหลัก</span>
+              <span className="text-sm font-bold text-f1-brand-ink">ตัวหนังสือสีธีม</span>
+              <span className="f1-navy-bg rounded-md px-3 py-1 text-sm font-bold text-f1-brand-bright">บนแถบหัว</span>
+            </div>
+            <span className="block text-xs text-f1-mute">
+              เห็นผลทันทีในหน้านี้ · กดอัปโหลดเพื่อใช้กับทุกจอ · ระบบปรับสีตัวหนังสือให้อ่านออกเองอัตโนมัติ
+            </span>
+          </div>
         </div>
 
         <h2 className="f1-font-display text-sm font-bold text-f1-ink">
@@ -904,7 +913,7 @@ export function EditPage() {
           </Button>
           <Button
             disabled={saving}
-            className="f1-font-display bg-f1-brand text-f1-ink hover:bg-f1-brand-dark"
+            className="f1-font-display bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark"
             onClick={handleSave}
           >
             อัปโหลดแล้วไปเล่น

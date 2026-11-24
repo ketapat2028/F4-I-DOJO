@@ -1,3 +1,4 @@
+import { applyBrandColor, normalizeHex } from "./brandColor";
 import type { AnswerOption, MatchPair, PromptType, Theme } from "../types/theme";
 
 // key เดิมตอนยังเก็บใน localStorage — เหลือไว้อ่านเพื่อย้ายข้อมูลขึ้น server เท่านั้น (readLegacyLocalGame)
@@ -7,6 +8,8 @@ const DEFAULT_NAME = "I-DOJO - PIT 4 5S";
 // ชื่อตัวอย่างเดิมที่ยังค้างใน DB — อ่านแล้วแทนด้วยชื่อใหม่ (บันทึกจาก editor ครั้งถัดไปจะเขียนชื่อใหม่ลง DB)
 const LEGACY_NAMES = ["DOJO · F1 RACING RED", "I-DOJO - PIT 5 DOMINO IMPACT"];
 const DEFAULT_TIME = 300;
+// เกมจิ๊กซอนอกเว็บ (เฟสก่อนเข้าเกมนี้) ไม่ตั้งไว้เป็นค่าเริ่มต้น = ข้ามเฟสนี้เหมือนเกม flow เดิม
+const DEFAULT_JIGSAW_TIME = 0;
 const DEFAULT_PASS_PERCENT = 70;
 // ข้อแบบเก่า (ไม่มีช่อง correct) แปลงเป็นเลือกตอบ: คำตอบเดิม = ตัวถูก + ตัวลวงจากข้ออื่นอีกไม่เกินเท่านี้
 const LEGACY_DISTRACTORS = 3;
@@ -251,17 +254,14 @@ export class NoGameError extends Error {
   }
 }
 
-export class UnauthorizedError extends Error {
-  constructor() {
-    super("รหัสผู้ดูแลไม่ถูกต้อง");
-  }
-}
-
 function toPayload(game: Theme) {
   return {
     name: game.name,
+    jigsawTimeLimitSeconds: game.jigsawTimeLimitSeconds,
+    firstGame: game.firstGame,
     timeLimitSeconds: game.timeLimitSeconds,
     passPercent: game.passPercent,
+    brandColor: game.brandColor,
     pairs: game.pairs.map(toSpecRecord),
   };
 }
@@ -271,10 +271,15 @@ function fromPayload(data: unknown): Theme {
   return {
     id: "f1-board",
     name: typeof m.name === "string" && m.name && !LEGACY_NAMES.includes(m.name) ? m.name : DEFAULT_NAME,
+    jigsawTimeLimitSeconds: Number.isFinite(m.jigsawTimeLimitSeconds)
+      ? Math.max(0, m.jigsawTimeLimitSeconds as number)
+      : DEFAULT_JIGSAW_TIME,
+    firstGame: m.firstGame === "quiz" ? "quiz" : "jigsaw",
     timeLimitSeconds: Number.isFinite(m.timeLimitSeconds) ? Math.max(0, m.timeLimitSeconds as number) : DEFAULT_TIME,
     passPercent: Number.isFinite(m.passPercent)
       ? Math.min(100, Math.max(1, Math.round(m.passPercent as number)))
       : DEFAULT_PASS_PERCENT,
+    brandColor: normalizeHex(m.brandColor) ?? undefined,
     pairs: recordsToPairs(data),
     createdAt: 0,
     updatedAt: 0,
@@ -282,7 +287,6 @@ function fromPayload(data: unknown): Theme {
 }
 
 async function failure(res: Response, what: string): Promise<Error> {
-  if (res.status === 401) return new UnauthorizedError();
   let detail = "";
   try {
     const body = await res.json();
@@ -298,26 +302,19 @@ export async function getGame(): Promise<Theme> {
   if (res.status === 404) throw new NoGameError();
   if (!res.ok) throw await failure(res, "โหลดชุดคำถาม");
   const game = fromPayload(await res.json());
+  applyBrandColor(game.brandColor);
   if (game.pairs.length < 2) throw new NoGameError();
   return game;
 }
 
-export async function saveGame(game: Theme, adminSecret: string): Promise<Theme> {
+export async function saveGame(game: Theme): Promise<Theme> {
   const res = await fetch(`${API}/game`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", "x-admin-secret": adminSecret },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(toPayload(game)),
   });
   if (!res.ok) throw await failure(res, "บันทึก");
   return { ...game, updatedAt: Date.now() };
-}
-
-// รูปเก็บเป็นแถวในตาราง images บน server (ไม่ใช่ไฟล์) คืน URL (/I-DOJO/api/images/<id>) ไว้เก็บแทน base64
-export async function verifyAdmin(adminSecret: string): Promise<boolean> {
-  const res = await fetch(`${API}/admin/check`, { headers: { "x-admin-secret": adminSecret } });
-  if (res.status === 401) return false;
-  if (!res.ok) throw await failure(res, "ตรวจรหัส");
-  return true;
 }
 
 function extOf(name: string): string {
@@ -338,14 +335,14 @@ export function checkVideoFile(file: File): string | null {
   return null;
 }
 
-export async function uploadImage(file: Blob, adminSecret: string): Promise<string> {
+// รูปเก็บเป็นแถวในตาราง images บน server (ไม่ใช่ไฟล์) คืน URL (/I-DOJO/api/images/<id>) ไว้เก็บแทน base64
+export async function uploadImage(file: Blob): Promise<string> {
   if (file.size > IMAGE_MAX_MB * 1024 * 1024) throw new Error(`รูปใหญ่เกิน ${IMAGE_MAX_MB}MB`);
   const form = new FormData();
   const name = file instanceof File ? file.name : "image.jpg";
   form.append("image", file, name);
   const res = await fetch(`${API}/upload`, {
     method: "POST",
-    headers: { "x-admin-secret": adminSecret },
     body: form,
   });
   if (!res.ok) throw await failure(res, "อัปโหลดรูป");
@@ -355,18 +352,16 @@ export async function uploadImage(file: Blob, adminSecret: string): Promise<stri
 
 // VDO ใหญ่ (ถึง 300MB) ใช้ XMLHttpRequest เพราะ fetch ไม่บอกความคืบหน้าการอัปโหลด
 // onProgress ได้ค่า 0–100 · คืน URL (/I-DOJO/api/videos/<file>)
-export function uploadVideo(file: File, adminSecret: string, onProgress?: (percent: number) => void): Promise<string> {
+export function uploadVideo(file: File, onProgress?: (percent: number) => void): Promise<string> {
   const invalid = checkVideoFile(file);
   if (invalid) return Promise.reject(new Error(invalid));
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API}/upload-video`);
-    xhr.setRequestHeader("x-admin-secret", adminSecret);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress?.(Math.round((100 * e.loaded) / e.total));
     };
     xhr.onload = () => {
-      if (xhr.status === 401) return reject(new UnauthorizedError());
       let body: { filename?: string; error?: string } = {};
       try {
         body = JSON.parse(xhr.responseText);

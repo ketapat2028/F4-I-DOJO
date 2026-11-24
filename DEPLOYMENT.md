@@ -37,7 +37,7 @@
 - ชุดคำถามของเกมเก็บในตาราง `game` (แถวเดียว, JSON) ผ่าน `GET /api/game` (404 = ยังไม่มี) และ `PUT /api/game`
 - รูปที่อัปโหลดจากหน้า editor เก็บเป็น `LONGBLOB` ในตาราง `images` (ไม่เขียนไฟล์ลงดิสก์) — `POST /api/upload` (field `image`, `.jpg .jpeg .png .gif .webp` ไม่เกิน 10MB) คืน `{ id }` แล้ว question/answer เก็บ URL `/I-DOJO/api/images/<id>`, เปิดรูปผ่าน `GET /api/images/:id` (ไม่ต้องใช้รหัส) · ไฟล์ผิดชนิด/ใหญ่เกินได้ 400 JSON `{error}` ภาษาไทย · รูปอยู่ใน DB แล้ว **backup DB อย่างเดียวได้รูปครบ** แต่ DB จะโตตามจำนวนรูป และรูปที่เลิกใช้ไม่ถูกลบอัตโนมัติ
 - VDO ของแต่ละข้อเก็บเป็น**ไฟล์**ใน `backend/videos/` (ใหญ่เกินจะเก็บใน DB) — `POST /api/upload-video` (field `video`, `.mp4 .m4v .webm .ogv` ไม่เกิน 300MB) คืน `{ filename }` แล้วข้อนั้นเก็บ URL `/I-DOJO/api/videos/<filename>` เสิร์ฟแบบ static (รองรับ Range) · **backup ต้องเอาโฟลเดอร์ `backend/videos/` ไปด้วย** · ถ้า Apache ตั้ง `LimitRequestBody` หรือ `ProxyTimeout` ไว้ต่ำ ต้องเพิ่มให้รับไฟล์ 300MB ได้ · ไฟล์ที่เลิกใช้ไม่ถูกลบอัตโนมัติ
-- `PUT /api/game`, `POST /api/upload`, `POST /api/upload-video`, `GET /api/admin/check`, `POST`/`DELETE /api/records`, `POST /api/app-config` ต้องส่ง header `x-admin-secret` ตรงกับ `ADMIN_SECRET` — ผู้ดูแลกรอกรหัสนี้ในหน้า `/I-DOJO/editor` (ไม่ได้ฝังใน frontend) ถ้า `ADMIN_SECRET` ว่างจะบันทึกไม่ได้เลย
+- หน้า `/I-DOJO/editor` และ `PUT /api/game`, `POST /api/upload`, `POST /api/upload-video`, `POST`/`DELETE /api/records`, `POST /api/app-config` ไม่มีการตรวจสิทธิ์แล้ว — ใครที่เข้าถึงหน้านี้ได้ก็บันทึก/อัปโหลดได้ทันที
 - Config อยู่ใน `backend/.env` (ไม่ commit, permission `600`, owner `idojo`)
 - ต้องมี `backend/.env.example` ที่ระบุ key ทุกตัวโดยไม่มีค่าจริง
 
@@ -49,11 +49,9 @@ DB_HOST=localhost
 DB_USER=idojo
 DB_PASS=
 DB_NAME=pit5_station
-ADMIN_SECRET=
 ```
 
 - ไม่มี `DB_PORT` — โค้ดไม่ได้อ่าน ใช้ default ของ mariadb (3306)
-- `ADMIN_SECRET` = รหัสผู้ดูแลสำหรับบันทึกชุดคำถาม/อัปโหลดรูป (ดูข้างบน)
 - `backend/uploads/` เหลือไว้เสิร์ฟแบบ static เผื่อชุดคำถามเก่าที่ยังอ้างอิงไฟล์อยู่ (`/I-DOJO/api/uploads/<file>`, อ้างจากที่อยู่ของ `index.js`) แต่รูปที่อัปโหลดใหม่ทั้งหมดเก็บในตาราง `images` แล้ว ไม่ได้เขียนไฟล์เพิ่มอีก
 - Express ยังเสิร์ฟ `backend/build` ที่ `/I-DOJO` ด้วย (ไว้ทดสอบตรง port 5000 โดยไม่มี Apache) และตัด `/I-DOJO` ออกจาก `/I-DOJO/api/...` เองแบบเดียวกับ Apache — บน Pi ส่วนนี้ Apache เสิร์ฟเอง
 - เกมถูกฝังเป็น iframe บนจอ Station ของ portal — **ห้ามเพิ่ม `X-Frame-Options` หรือ CSP `frame-ancestors`** ใน Apache (ดู `PORTAL_INTEGRATION.md`)
