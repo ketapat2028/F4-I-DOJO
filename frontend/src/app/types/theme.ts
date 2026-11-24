@@ -15,6 +15,7 @@ export interface MatchPair {
   promptText: string;
   promptImage?: string; // data URL หรือลิงก์ http(s)
   video?: string; // VDO ของข้อนี้ (ไม่บังคับ) เล่นจบก่อนถึงจะแสดงตัวเลือก
+  answerVideo?: string; // VDO เฉลย (ไม่บังคับ) เล่นหลังตอบถูก จบแล้วค่อยไปข้อถัดไป
   // ตัวเลือก — อย่างน้อย 2 ตัว ถูกพอดี 1 ตัว
   answers: AnswerOption[];
 }
@@ -22,7 +23,7 @@ export interface MatchPair {
 export interface Theme {
   id: string;
   name: string;
-  timeLimitSeconds: number; // เวลารวมทั้งเกม · 0 = ไม่จำกัดเวลา
+  timeLimitSeconds: number; // เวลารวมทั้งเกม ใช้เฉพาะเกมจับเวลา (/timed) · 0 = ไม่จำกัดเวลา
   passPercent: number; // เกณฑ์ผ่าน: ตอบถูกอย่างน้อยกี่ % ของจำนวนข้อ (ปัดขึ้น)
   pairs: MatchPair[];
   createdAt: number;

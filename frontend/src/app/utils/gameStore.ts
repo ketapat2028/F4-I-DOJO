@@ -43,6 +43,7 @@ export interface SpecRecord {
   id?: string;
   question?: SpecSide;
   videoUrl?: string;
+  answerVideoUrl?: string;
   // answer = รูปแบบเก่า (คำตอบเดียว) เหลือไว้อ่านข้อมูลเดิม ไม่เขียนออกแล้ว — ดู fromAnyRecord
   answer?: SpecSide;
   answers?: SpecSide[];
@@ -132,6 +133,7 @@ export function toSpecRecord(pair: MatchPair): SpecRecord {
     id: pair.id,
     question: { type: pair.promptType, text: pair.promptText, imageUrl: pair.promptImage ?? "" },
     videoUrl: pair.video ?? "",
+    answerVideoUrl: pair.answerVideo ?? "",
     answers: pair.answers.map((a) => ({
       id: a.id,
       type: a.type,
@@ -193,6 +195,7 @@ function fromAnyRecord(record: Record<string, unknown>): MatchPair {
     promptText: String((q ? q.text : (record.topic ?? record.promptText)) ?? ""),
     promptImage: optString(q ? q.imageUrl : (record.imageUrl ?? record.promptImage)),
     video: optString(record.videoUrl ?? record.video),
+    answerVideo: optString(record.answerVideoUrl ?? record.answerVideo),
     answers: extractAnswers(record),
   };
 }

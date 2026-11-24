@@ -114,9 +114,9 @@ function setVideoPlaying(on: boolean) {
   document.documentElement.classList.toggle("f1-video-playing", on);
 }
 
-// VDO ของข้อ: เล่นอัตโนมัติ ไม่มีปุ่มควบคุม (ข้ามไม่ได้) · จบ/โหลดไม่ได้/ค้าง → onDone ครั้งเดียว
+// VDO ของข้อ/VDO เฉลย: เล่นอัตโนมัติ ไม่มีปุ่มควบคุม (ข้ามไม่ได้) · จบ/โหลดไม่ได้/ค้าง → onDone ครั้งเดียว
 // browser บล็อกเล่นอัตโนมัติ → แสดงปุ่มให้แตะเล่น
-function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
+function QuestionVideo({ src, hint, onDone }: { src: string; hint: string; onDone: () => void }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [blocked, setBlocked] = useState(false);
   const blockedRef = useRef(false);
@@ -199,13 +199,14 @@ function QuestionVideo({ src, onDone }: { src: string; onDone: () => void }) {
         </button>
       )}
       <p className="f1-font-display pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white lg:text-lg">
-        ดู VDO ให้จบ แล้วตัวเลือกจะแสดง
+        {hint}
       </p>
     </div>
   );
 }
 
-export function PlayPage() {
+// timed = เกมจับเวลา (/timed) ใช้ timeLimitSeconds ของชุดคำถาม · ไม่ใช่ (/) = ไม่จับเวลา แค่นับเวลาที่ใช้
+export function PlayPage({ timed = false }: { timed?: boolean }) {
   const [game, setGame] = useState<Theme | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -227,6 +228,8 @@ export function PlayPage() {
   const [picked, setPicked] = useState<string | null>(null);
   // VDO ของข้อปัจจุบันเล่นจบแล้วหรือยัง (ข้อที่ไม่มี VDO = true)
   const [videoDone, setVideoDone] = useState(true);
+  // กำลังเล่น VDO เฉลยของข้อปัจจุบัน (หลังตอบถูก) — จบแล้วค่อยไปข้อถัดไป
+  const [answerPlaying, setAnswerPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   // เอฟเฟกต์ทับหน้าจอ · n เปลี่ยนทุกครั้งให้แอนิเมชันเริ่มใหม่
   const [flash, setFlash] = useState<{ ok: boolean; n: number } | null>(null);
@@ -296,15 +299,15 @@ export function PlayPage() {
     };
   }, []);
 
-  // เวลาเดินเฉพาะตอนเล่นและไม่ได้ดู VDO (GAMEPLAY.md 3.4 — หยุดชั่วคราวระหว่าง VDO)
-  const clockRunning = phase === "playing" && videoDone;
+  // เวลาเดินเฉพาะตอนเล่นและไม่ได้ดู VDO (GAMEPLAY.md 3.4 — หยุดระหว่างทั้ง VDO ของข้อและ VDO เฉลย)
+  const clockRunning = phase === "playing" && videoDone && !answerPlaying;
   useEffect(() => {
     if (!clockRunning) return;
     const timer = window.setInterval(() => setElapsed((prev) => prev + 1), 1000);
     return () => window.clearInterval(timer);
   }, [clockRunning]);
 
-  const limit = game?.timeLimitSeconds ?? 0;
+  const limit = timed ? (game?.timeLimitSeconds ?? 0) : 0;
   useEffect(() => {
     if (phase === "playing" && limit > 0 && elapsed >= limit) finish(results, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,6 +340,7 @@ export function PlayPage() {
   const score = results.filter(Boolean).length;
   const playableCount = game.pairs.filter(isPairComplete).length;
   const requiredOf = (n: number) => Math.ceil((n * game.passPercent) / 100);
+  const preloadSrc = current?.pair.answerVideo ?? rounds[index + 1]?.pair.video;
   // ตอนถูกฝัง: ส่งผลไปแล้ว (กำลังรอ/ได้ ack) → ให้จอจัดการต่อ
   const resultHandedOff = embedded && (portalStatus === "sending" || portalStatus === "sent");
 
@@ -373,6 +377,7 @@ export function PlayPage() {
     setRetryPrompt(false);
     setPicked(null);
     setVideoDone(!next[0]?.pair.video);
+    setAnswerPlaying(false);
     setElapsed(0);
     setFlash(null);
     setSummary(null);
@@ -390,13 +395,14 @@ export function PlayPage() {
     setPhase("finished");
     setPicked(null);
     setRetryPrompt(false);
+    setAnswerPlaying(false);
     setSummary({ score: s, total, required, passed, timeout, timeUsed: hasLimit ? Math.min(elapsedRef.current, limit) : elapsedRef.current });
     // score ที่ส่ง portal = % ของข้อที่ตอบถูก จำนวนเต็ม 0–100 (STATION_ACTIVITY.md 3.1) — หน้าสรุปยังแสดงเป็นจำนวนข้อ
     report({ result: passed ? "pass" : "fail", score: total > 0 ? Math.round((100 * s) / total) : 0 });
   }
 
   // ตอบผิด → เอฟเฟกต์ผิด แล้วเด้งป๊อปอัปให้เลือกดู VDO ซ้ำ/ตอบใหม่ · อยู่ข้อเดิมจนกว่าจะตอบถูก
-  // ตอบถูก → เอฟเฟกต์ถูก แล้วไปข้อถัดไป (ได้คะแนนข้อนี้ ไม่ว่าจะตอบกี่ครั้ง)
+  // ตอบถูก → เอฟเฟกต์ถูก → VDO เฉลย (ถ้ามี) → ข้อถัดไป (ได้คะแนนข้อนี้ ไม่ว่าจะตอบกี่ครั้ง)
   function choose(option: AnswerOption) {
     if (phase !== "playing" || picked || retryPrompt || !videoDone || !current) return;
     if (wrongIds.includes(option.id)) return;
@@ -417,15 +423,22 @@ export function PlayPage() {
     setTries((prev) => [...prev, wrongIds.length + 1]);
     advanceTimerRef.current = window.setTimeout(() => {
       advanceTimerRef.current = null;
-      if (index + 1 >= total) {
-        finish(nextResults, false);
-        return;
-      }
-      setIndex(index + 1);
-      setPicked(null);
-      setWrongIds([]);
-      setVideoDone(!rounds[index + 1].pair.video);
+      if (current.pair.answerVideo) setAnswerPlaying(true);
+      else advance(nextResults);
     }, REVEAL_MS);
+  }
+
+  // ไปข้อถัดไป หรือจบเกมถ้าเป็นข้อสุดท้าย
+  function advance(finalResults: boolean[]) {
+    setAnswerPlaying(false);
+    if (index + 1 >= total) {
+      finish(finalResults, false);
+      return;
+    }
+    setIndex(index + 1);
+    setPicked(null);
+    setWrongIds([]);
+    setVideoDone(!rounds[index + 1].pair.video);
   }
 
   // กลับหน้าหลัก = หน้าเริ่มเกม ("พร้อมออกตัว?") รอกดเริ่มรอบใหม่
@@ -439,6 +452,7 @@ export function PlayPage() {
     setFlash(null);
     setPicked(null);
     setRetryPrompt(false);
+    setAnswerPlaying(false);
     setElapsed(0);
     setPhase("idle");
   }
@@ -447,6 +461,37 @@ export function PlayPage() {
     setRetryPrompt(false);
     setReplayN((n) => n + 1);
     setVideoDone(false);
+  }
+
+  // หน้าต่าง VDO เต็มจอตรงกลาง (VDO ของข้อ / VDO เฉลย) · ฝังใน portal → เว้นขอบล่างให้ปุ่มของ portal ไม่ทับภาพ
+  // (แยก px/pt กับ pb — ถ้าใช้ lg:p-4 จะทับ PORTAL_BOTTOM_GAP)
+  function renderVideoModal(v: { label: string; answer: boolean; src: string; videoKey: string; hint: string; onDone: () => void }) {
+    const prompt = current?.pair.promptText.trim();
+    return (
+      <div
+        className={cn(
+          "f1-fade-in fixed inset-0 z-50 flex flex-col gap-2 bg-black px-2 pt-2 lg:gap-4 lg:px-4 lg:pt-4",
+          embedded ? PORTAL_BOTTOM_GAP : "pb-2 lg:pb-4",
+        )}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`VDO ${v.label}`}
+      >
+        <div className="f1-font-display flex shrink-0 items-center justify-center gap-3 px-2 text-center text-white lg:gap-5">
+          {v.answer ? (
+            <span className="f1-font-mono flex shrink-0 items-center gap-1.5 rounded-full bg-[#15803D] px-3 py-0.5 text-sm font-bold tracking-widest sm:text-lg lg:gap-2 lg:px-5 lg:py-1 lg:text-2xl">
+              <Check className="size-4 lg:size-7" strokeWidth={3} /> {v.label}
+            </span>
+          ) : (
+            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand sm:text-lg lg:text-2xl">{v.label}</span>
+          )}
+          {prompt && <span className="line-clamp-2 text-lg font-bold sm:text-2xl lg:text-4xl">{prompt}</span>}
+        </div>
+        <div className={cn("f1-pop-in-spring flex min-h-0 flex-1 overflow-hidden rounded-lg lg:rounded-2xl", v.answer && "ring-2 ring-[#15803D] lg:ring-4")}>
+          <QuestionVideo key={v.videoKey} src={v.src} hint={v.hint} onDone={v.onDone} />
+        </div>
+      </div>
+    );
   }
 
   function renderPrompt(pair: MatchPair) {
@@ -569,7 +614,8 @@ export function PlayPage() {
               <ul className="space-y-1 text-left text-base text-f1-ink-2 lg:space-y-2 lg:text-xl">
                 <li>• คำถามทั้งหมด {playableCount} ข้อ เลือกคำตอบที่ถูกข้อละ 1 ตัว</li>
                 <li>• ต้องตอบให้ถูกถึงจะไปข้อถัดไป ตอบผิดเลือกได้ว่าจะดู VDO ซ้ำหรือตอบใหม่เลย</li>
-                <li>• ข้อที่มี VDO ต้องดูให้จบก่อน ตัวเลือกถึงจะแสดง (ระหว่างดู VDO เวลาหยุด)</li>
+                <li>• ข้อที่มี VDO ต้องดูให้จบก่อน ตัวเลือกถึงจะแสดง{limit > 0 && " (ระหว่างดู VDO เวลาหยุด)"}</li>
+                {game.pairs.some((p) => isPairComplete(p) && p.answerVideo) && <li>• ตอบถูกแล้ว บางข้อมี VDO เฉลยให้ดูก่อนไปข้อถัดไป</li>}
                 <li>
                   {limit > 0 ? (
                     <>
@@ -640,35 +686,32 @@ export function PlayPage() {
         )}
       </main>
 
-      {/* VDO ของข้อ: หน้าต่างเต็มจอตรงกลาง ดูจบแล้วปิดเอง แล้วตัวเลือกเด้งขึ้น
-          ฝังใน portal → เว้นขอบล่างให้ปุ่มของ portal ไม่ทับภาพ */}
-      {phase === "playing" && current?.pair.video && !videoDone && (
-        <div
-          className={cn("f1-fade-in fixed inset-0 z-50 flex flex-col gap-2 bg-black px-2 pt-2 lg:gap-4 lg:px-4 lg:pt-4",
-            embedded ? PORTAL_BOTTOM_GAP : "pb-2 lg:pb-4",
-          )}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`VDO ข้อ ${index + 1}`}
-        >
-          <div className="f1-font-display flex shrink-0 items-baseline justify-center gap-3 px-2 text-center text-white lg:gap-5">
-            <span className="f1-font-mono shrink-0 text-sm font-bold tracking-widest text-f1-brand sm:text-lg lg:text-2xl">
-              ข้อ {index + 1} / {total}
-            </span>
-            {current.pair.promptText.trim() && (
-              <span className="line-clamp-2 text-lg font-bold sm:text-2xl lg:text-4xl">{current.pair.promptText}</span>
-            )}
-          </div>
-          <div className="f1-pop-in-spring flex min-h-0 flex-1 overflow-hidden rounded-lg lg:rounded-2xl">
-            <QuestionVideo key={`${roundId}:${index}:${replayN}`} src={current.pair.video} onDone={() => setVideoDone(true)} />
-          </div>
-        </div>
-      )}
+      {/* VDO ของข้อ: หน้าต่างเต็มจอตรงกลาง ดูจบแล้วปิดเอง แล้วตัวเลือกเด้งขึ้น */}
+      {phase === "playing" && current?.pair.video && !videoDone &&
+        renderVideoModal({
+          label: `ข้อ ${index + 1} / ${total}`,
+          answer: false,
+          src: current.pair.video,
+          videoKey: `${roundId}:${index}:${replayN}`,
+          hint: "ดู VDO ให้จบ แล้วตัวเลือกจะแสดง",
+          onDone: () => setVideoDone(true),
+        })}
 
-      {/* โหลด VDO ข้อถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ข้อเดียว) — ถึงข้อนั้นเริ่มเล่นทันที ไม่ต้องรอบัฟเฟอร์
-          ทำเฉพาะตอน VDO ข้อนี้จบแล้ว จะได้ไม่แย่งตัวถอดรหัส/เน็ตกับ VDO ที่กำลังเล่น */}
-      {phase === "playing" && videoDone && rounds[index + 1]?.pair.video && (
-        <video key={rounds[index + 1].pair.video} src={rounds[index + 1].pair.video} preload="auto" muted playsInline className="hidden" aria-hidden />
+      {/* VDO เฉลย: หลังตอบถูก ดูจบแล้วไปข้อถัดไป (ข้อสุดท้าย → สรุปผล) */}
+      {phase === "playing" && current?.pair.answerVideo && answerPlaying &&
+        renderVideoModal({
+          label: `เฉลย ข้อ ${index + 1} / ${total}`,
+          answer: true,
+          src: current.pair.answerVideo,
+          videoKey: `${roundId}:${index}:answer`,
+          hint: index + 1 >= total ? "ดู VDO เฉลยให้จบ แล้วจะสรุปผล" : "ดู VDO เฉลยให้จบ แล้วจะไปข้อถัดไป",
+          onDone: () => advance(results),
+        })}
+
+      {/* โหลด VDO ถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ตัวเดียว: VDO เฉลยของข้อนี้ ถ้าไม่มีก็ VDO ข้อถัดไป) — ถึงตอนเล่นเริ่มทันที ไม่ต้องรอบัฟเฟอร์
+          ทำเฉพาะตอนไม่มี VDO กำลังเล่น จะได้ไม่แย่งตัวถอดรหัส/เน็ตกับ VDO ที่กำลังเล่น */}
+      {phase === "playing" && videoDone && !answerPlaying && preloadSrc && (
+        <video key={preloadSrc} src={preloadSrc} preload="auto" muted playsInline className="hidden" aria-hidden />
       )}
 
       {flash && (

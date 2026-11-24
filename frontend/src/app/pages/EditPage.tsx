@@ -173,6 +173,7 @@ function pairProblems(p: MatchPair): string[] {
 }
 
 interface VideoFieldProps {
+  title: string;
   video?: string;
   onVideo: (v: string | undefined) => void;
   onUpload: (file: File, onProgress: (percent: number) => void) => Promise<string | undefined>;
@@ -186,7 +187,7 @@ const SOURCE_EXTS = [...VIDEO_EXTS, ".mov", ".mkv"];
 type VideoStep = "checking" | "converting" | "uploading";
 
 // เลือก VDO → ตรวจว่าเล่นลื่นบนจอ Station (Pi 4) ไหม → ไม่ลื่นก็แปลงในเครื่องนี้ก่อน (videoConvert.ts) → อัปโหลด
-function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
+function VideoField({ title, video, onVideo, onUpload }: VideoFieldProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<VideoStep | null>(null);
   const [percent, setPercent] = useState(0);
@@ -265,7 +266,7 @@ function VideoField({ video, onVideo, onUpload }: VideoFieldProps) {
   return (
     <div className="space-y-2 rounded-sm border border-f1-line bg-zinc-50 p-3 text-sm text-zinc-700">
       <p className="f1-font-display flex items-center gap-1.5 font-bold text-f1-ink">
-        <Film className="size-4 text-f1-brand-ink" /> VDO ของข้อนี้ (ไม่บังคับ — เล่นจบก่อนถึงจะแสดงตัวเลือก ผู้เล่นข้ามไม่ได้)
+        <Film className="size-4 text-f1-brand-ink" /> {title}
       </p>
       {video && <video src={video} controls preload="metadata" className="max-h-48 w-full rounded-sm bg-black" />}
       <div className="flex flex-wrap items-center gap-3">
@@ -687,7 +688,7 @@ export function EditPage() {
             />
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
-            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด)</span>
+            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด) — ใช้เฉพาะเกมจับเวลา</span>
             <Input
               type="number"
               min={0}
@@ -697,7 +698,9 @@ export function EditPage() {
               }
               className="border-[#8B8B95] bg-white text-f1-ink"
             />
-            <span className="block text-xs text-f1-mute">เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO</span>
+            <span className="block text-xs text-f1-mute">
+              เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO · ใช้เฉพาะ <code>/I-DOJO/timed</code> (หน้า <code>/I-DOJO/</code> ไม่จับเวลา)
+            </span>
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
             <span>เกณฑ์ผ่าน (% ของจำนวนข้อ ปัดขึ้น)</span>
@@ -845,8 +848,15 @@ export function EditPage() {
             </div>
 
             <VideoField
+              title="VDO ของข้อนี้ (ไม่บังคับ — เล่นจบก่อนถึงจะแสดงตัวเลือก ผู้เล่นข้ามไม่ได้)"
               video={pair.video}
               onVideo={(v) => updatePair(pair.id, { video: v })}
+              onUpload={handleUploadVideo}
+            />
+            <VideoField
+              title="VDO เฉลย (ไม่บังคับ — เล่นหลังตอบถูก จบแล้วค่อยไปข้อถัดไป ผู้เล่นข้ามไม่ได้)"
+              video={pair.answerVideo}
+              onVideo={(v) => updatePair(pair.id, { answerVideo: v })}
               onUpload={handleUploadVideo}
             />
           </div>
