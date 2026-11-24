@@ -15,17 +15,22 @@ export function F1Header() {
             I-DOJO <span className="text-f1-brand-bright">PIT 4</span>
             <span className="ml-2 hidden text-sm font-medium text-zinc-300 sm:inline">5S</span>
           </Link>
-          <Link to="/timed" className="hover:text-white">
-            จับเวลา
-          </Link>
-          <Link to="/editor" className="hover:text-white">
-            แก้ไขโจทย์
-          </Link>
-          <Link to="/convert" className="hover:text-white">
-            แปลง VDO
-          </Link>
-        </nav>
-      </div>
-    </header>
+          <nav className="f1-font-display ml-auto flex gap-4 text-sm font-medium tracking-wide text-zinc-300">
+            <Link to="/" className="hover:text-white">
+              เล่นเกม
+            </Link>
+            <Link to="/timed" className="hover:text-white">
+              จับเวลา
+            </Link>
+            <Link to="/editor" className="hover:text-white">
+              แก้ไขโจทย์
+            </Link>
+            <Link to="/convert" className="hover:text-white">
+              แปลง VDO
+            </Link>
+          </nav>
+        </div>
+      </header>
+    </>
   );
 }
