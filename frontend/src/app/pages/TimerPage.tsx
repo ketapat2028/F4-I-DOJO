@@ -209,7 +209,7 @@ export function TimerPage() {
         {next && (
           <Button
             key={`start-${next}`}
-            className="f1-glow f1-press f1-pop-in-spring h-16 w-full max-w-xl shrink-0 bg-f1-brand text-2xl font-bold text-f1-ink hover:bg-f1-brand-dark lg:h-28 lg:rounded-2xl lg:text-5xl"
+            className="f1-glow f1-press f1-pop-in-spring h-16 w-full max-w-xl shrink-0 bg-f1-brand text-2xl font-bold text-f1-on-brand hover:bg-f1-brand-dark lg:h-28 lg:rounded-2xl lg:text-5xl"
             onClick={() => start(next)}
           >
             <Play className="size-6 lg:size-12" fill="currentColor" /> เริ่มจับเวลา {next === "before" ? "BEFORE" : "AFTER"}
@@ -257,7 +257,7 @@ export function TimerPage() {
                 {portalStatus === "error" && (
                   <>
                     <span>ส่งผลไม่สำเร็จ: {portalMsg}</span>
-                    <Button size="sm" className="f1-press bg-f1-brand text-f1-ink hover:bg-f1-brand-dark lg:h-14 lg:px-6 lg:text-2xl" onClick={report}>
+                    <Button size="sm" className="f1-press bg-f1-brand text-f1-on-brand hover:bg-f1-brand-dark lg:h-14 lg:px-6 lg:text-2xl" onClick={report}>
                       ส่งใหม่
                     </Button>
                   </>
@@ -267,7 +267,7 @@ export function TimerPage() {
 
             {!embedded && (
               <Button
-                className="f1-press f1-rise-in mt-4 h-12 bg-f1-brand px-6 text-lg text-f1-ink [animation-delay:700ms] hover:bg-f1-brand-dark lg:mt-6 lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl"
+                className="f1-press f1-rise-in mt-4 h-12 bg-f1-brand px-6 text-lg text-f1-on-brand [animation-delay:700ms] hover:bg-f1-brand-dark lg:mt-6 lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl"
                 onClick={() => redo("before")}
               >
                 <RotateCcw className="lg:size-7" /> เริ่มใหม่
