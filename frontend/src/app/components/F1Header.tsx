@@ -16,6 +16,9 @@ export function F1Header() {
           <Link to="/" className="hover:text-white">
             เล่นเกม
           </Link>
+          <Link to="/timed" className="hover:text-white">
+            จับเวลา
+          </Link>
           <Link to="/editor" className="hover:text-white">
             แก้ไขโจทย์
           </Link>

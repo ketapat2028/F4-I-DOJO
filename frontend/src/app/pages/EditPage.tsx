@@ -688,7 +688,7 @@ export function EditPage() {
             />
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
-            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด) — ใช้เฉพาะเกมจับเวลา</span>
+            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด)</span>
             <Input
               type="number"
               min={0}
@@ -698,9 +698,7 @@ export function EditPage() {
               }
               className="border-[#8B8B95] bg-white text-f1-ink"
             />
-            <span className="block text-xs text-f1-mute">
-              เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO · ใช้เฉพาะ <code>/I-DOJO/timed</code> (หน้า <code>/I-DOJO/</code> ไม่จับเวลา)
-            </span>
+            <span className="block text-xs text-f1-mute">เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO</span>
           </label>
           <label className="space-y-1 text-sm text-zinc-700">
             <span>เกณฑ์ผ่าน (% ของจำนวนข้อ ปัดขึ้น)</span>

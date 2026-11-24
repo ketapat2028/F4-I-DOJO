@@ -23,7 +23,7 @@ export interface MatchPair {
 export interface Theme {
   id: string;
   name: string;
-  timeLimitSeconds: number; // เวลารวมทั้งเกม ใช้เฉพาะเกมจับเวลา (/timed) · 0 = ไม่จำกัดเวลา
+  timeLimitSeconds: number; // เวลารวมทั้งเกม · 0 = ไม่จำกัดเวลา
   passPercent: number; // เกณฑ์ผ่าน: ตอบถูกอย่างน้อยกี่ % ของจำนวนข้อ (ปัดขึ้น)
   pairs: MatchPair[];
   createdAt: number;

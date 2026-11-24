@@ -28,7 +28,7 @@ const LOW_TIME_S = 30;
 const VIDEO_STALL_S = 15;
 const LETTERS = "ABCDEFGHIJ";
 // ตอนถูกฝัง: เว้นขอบล่างให้ปุ่ม "ENTER / SPACEBAR · ผ่านสถานี" ของ portal (~90px, STATION_ACTIVITY.md ข้อ 5)
-const PORTAL_BOTTOM_GAP = "pb-[96px]";
+export const PORTAL_BOTTOM_GAP = "pb-[96px]";
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -205,8 +205,7 @@ function QuestionVideo({ src, hint, onDone }: { src: string; hint: string; onDon
   );
 }
 
-// timed = เกมจับเวลา (/timed) ใช้ timeLimitSeconds ของชุดคำถาม · ไม่ใช่ (/) = ไม่จับเวลา แค่นับเวลาที่ใช้
-export function PlayPage({ timed = false }: { timed?: boolean }) {
+export function PlayPage() {
   const [game, setGame] = useState<Theme | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -307,7 +306,7 @@ export function PlayPage({ timed = false }: { timed?: boolean }) {
     return () => window.clearInterval(timer);
   }, [clockRunning]);
 
-  const limit = timed ? (game?.timeLimitSeconds ?? 0) : 0;
+  const limit = game?.timeLimitSeconds ?? 0;
   useEffect(() => {
     if (phase === "playing" && limit > 0 && elapsed >= limit) finish(results, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
