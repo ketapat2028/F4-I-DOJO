@@ -7,10 +7,8 @@ const META_KEY = "idojo.f1.meta.v4";
 const DEFAULT_NAME = "I-DOJO - PIT 4 5S";
 // ชื่อตัวอย่างเดิมที่ยังค้างใน DB — อ่านแล้วแทนด้วยชื่อใหม่ (บันทึกจาก editor ครั้งถัดไปจะเขียนชื่อใหม่ลง DB)
 const LEGACY_NAMES = ["DOJO · F1 RACING RED", "I-DOJO - PIT 5 DOMINO IMPACT"];
-const DEFAULT_TIME = 300;
 // เกมจิ๊กซอนอกเว็บ (เฟสก่อนเข้าเกมนี้) ไม่ตั้งไว้เป็นค่าเริ่มต้น = ข้ามเฟสนี้เหมือนเกม flow เดิม
 const DEFAULT_JIGSAW_TIME = 0;
-const DEFAULT_PASS_PERCENT = 70;
 // ข้อแบบเก่า (ไม่มีช่อง correct) แปลงเป็นเลือกตอบ: คำตอบเดิม = ตัวถูก + ตัวลวงจากข้ออื่นอีกไม่เกินเท่านี้
 const LEGACY_DISTRACTORS = 3;
 
@@ -259,8 +257,6 @@ function toPayload(game: Theme) {
     name: game.name,
     jigsawTimeLimitSeconds: game.jigsawTimeLimitSeconds,
     firstGame: game.firstGame,
-    timeLimitSeconds: game.timeLimitSeconds,
-    passPercent: game.passPercent,
     brandColor: game.brandColor,
     pairs: game.pairs.map(toSpecRecord),
   };
@@ -275,10 +271,6 @@ function fromPayload(data: unknown): Theme {
       ? Math.max(0, m.jigsawTimeLimitSeconds as number)
       : DEFAULT_JIGSAW_TIME,
     firstGame: m.firstGame === "quiz" ? "quiz" : "jigsaw",
-    timeLimitSeconds: Number.isFinite(m.timeLimitSeconds) ? Math.max(0, m.timeLimitSeconds as number) : DEFAULT_TIME,
-    passPercent: Number.isFinite(m.passPercent)
-      ? Math.min(100, Math.max(1, Math.round(m.passPercent as number)))
-      : DEFAULT_PASS_PERCENT,
     brandColor: normalizeHex(m.brandColor) ?? undefined,
     pairs: recordsToPairs(data),
     createdAt: 0,

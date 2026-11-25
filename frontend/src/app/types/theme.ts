@@ -27,8 +27,7 @@ export interface Theme {
   jigsawTimeLimitSeconds: number;
   // เกมไหนเล่นก่อน: "jigsaw" = จิ๊กซอก่อนแล้วค่อยเข้าเกมนี้ (เดิม) · "quiz" = เกมนี้ก่อนแล้วค่อยนับถอยหลังจิ๊กซอปิดท้าย
   firstGame: "jigsaw" | "quiz";
-  timeLimitSeconds: number; // เวลารวมทั้งเกม · 0 = ไม่จำกัดเวลา
-  passPercent: number; // เกณฑ์ผ่าน: ตอบถูกอย่างน้อยกี่ % ของจำนวนข้อ (ปัดขึ้น)
+  // เกมตอบคำถามไม่จำกัดเวลา ผ่านเสมอ — JSON เก่าที่ยังมี timeLimitSeconds / passPercent ถูกละไว้ตอนอ่าน
   brandColor?: string; // สีธีมหลัก (#rrggbb) — ไม่มี = ขาวดำ
   pairs: MatchPair[];
   createdAt: number;

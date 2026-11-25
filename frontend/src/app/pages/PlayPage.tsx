@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, CircleCheck, CircleX, Flag, Home, Loader2, Play, RotateCcw, ThumbsUp, Trophy, X } from "lucide-react";
+import { Check, CircleCheck, CircleX, Flag, Home, Loader2, Play, RotateCcw, ThumbsUp, Timer, Trophy, X } from "lucide-react";
 import { Confetti } from "../components/Confetti";
 import { F1Header } from "../components/F1Header";
 import { Button } from "../components/ui/button";
@@ -14,7 +14,8 @@ import { forwardKeys, isEmbedded, listenPortal, sendResult, type PortalAck, type
 type Phase = "idle" | "jigsaw" | "jigsawDone" | "playing" | "finished";
 // 1 ข้อที่จะเล่น: ตัวเลือกสลับลำดับไว้แล้วตอนเริ่มรอบ
 type Round = { pair: MatchPair; options: AnswerOption[] };
-type Summary = { score: number; total: number; required: number; passed: boolean; timeout: boolean; timeUsed: number };
+// เกมตอบคำถามไม่จำกัดเวลา + ต้องตอบจนถูกทุกข้อ → จบเกม = ผ่านเสมอ (score 100)
+type Summary = { score: number; total: number; timeUsed: number };
 type PortalStatus = "idle" | "sending" | "sent" | "error";
 type PortalReport = { result: PortalResult; score: number };
 
@@ -66,49 +67,17 @@ function GameTitle({ name }: { name: string }) {
   );
 }
 
-// นาฬิกาแข่ง: ตัวเลขใหญ่ + วงแหวนเวลาที่เหลือ · ≤ 30 วิ แดงกะพริบ · ≤ 10 วิ กรอบเต้น
-function RaceClock({ remaining, elapsed, limit, running }: { remaining: number | null; elapsed: number; limit: number; running: boolean }) {
-  const low = remaining !== null && remaining <= LOW_TIME_S;
-  const critical = remaining !== null && remaining <= 10;
-  const ratio = remaining !== null && limit > 0 ? remaining / limit : 1;
-  const R = 15;
-  const C = 2 * Math.PI * R;
+// นาฬิกาแข่ง: นับเวลาที่ใช้ขึ้นไปเรื่อย ๆ ไว้ดูอย่างเดียว (ไม่มีหมดเวลา) · หยุดเดินระหว่าง VDO เฉลย
+function RaceClock({ elapsed, running }: { elapsed: number; running: boolean }) {
   return (
     <div
-      className={cn(
-        "flex h-11 shrink-0 items-center gap-2 rounded-full border-2 pl-1.5 pr-4 shadow-md transition-colors duration-500 sm:h-14 sm:gap-3 sm:pr-5 lg:h-16 lg:pr-6",
-        low && running ? "border-f1-wrong shadow-[0_0_24px_rgba(220,0,0,0.6)]" : "border-f1-brand-bright",
-        critical && running && "f1-clock-pulse",
-      )}
+      className="flex h-11 shrink-0 items-center gap-2 rounded-full border-2 border-f1-brand-bright pl-2.5 pr-4 shadow-md sm:h-14 sm:gap-3 sm:pl-3 sm:pr-5 lg:h-16 lg:pr-6"
       style={{ backgroundColor: "#18181b" }}
       role="timer"
-      aria-label={remaining !== null ? "เวลาที่เหลือ" : "เวลาที่ใช้"}
+      aria-label="เวลาที่ใช้"
     >
-      <svg viewBox="0 0 36 36" className="size-8 shrink-0 -rotate-90 sm:size-11 lg:size-13">
-        <circle cx="18" cy="18" r={R} fill="none" strokeWidth="4" className="stroke-white/15" />
-        <circle
-          cx="18"
-          cy="18"
-          r={R}
-          fill="none"
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={C * (1 - ratio)}
-          className={cn(
-            "transition-[stroke-dashoffset,stroke] duration-1000 ease-linear",
-            remaining === null ? "stroke-white/40" : low ? "stroke-f1-wrong-bright" : "stroke-f1-brand-bright",
-          )}
-        />
-      </svg>
-      <span
-        className={cn(
-          "f1-font-mono text-2xl font-bold tabular-nums leading-none sm:text-4xl lg:text-5xl",
-          low && running ? "f1-timer-blink text-f1-wrong-bright" : "text-white",
-        )}
-      >
-        {formatTime(remaining ?? elapsed)}
-      </span>
+      <Timer className={cn("size-6 shrink-0 sm:size-8 lg:size-10", running ? "text-f1-brand-bright" : "text-white/40")} />
+      <span className="f1-font-mono text-2xl font-bold tabular-nums leading-none text-white sm:text-4xl lg:text-5xl">{formatTime(elapsed)}</span>
     </div>
   );
 }
@@ -364,12 +333,6 @@ export function PlayPage() {
     return () => window.clearInterval(timer);
   }, [clockRunning]);
 
-  const limit = game?.timeLimitSeconds ?? 0;
-  useEffect(() => {
-    if (phase === "playing" && limit > 0 && elapsed >= limit) finish(results, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [elapsed, phase, limit]);
-
   const jigsawLimit = game?.jigsawTimeLimitSeconds ?? 0;
   const jigsawRunning = phase === "jigsaw";
   useEffect(() => {
@@ -404,16 +367,12 @@ export function PlayPage() {
   const current = rounds[index];
   // โชว์ overlay เฉลยกลางจอตอนตอบถูก — อยู่พร้อมกันกับช่วงที่ปุ่มตัวเลือกเขียวเด้ง (picked ถูกเคลียร์ตอนไปข้อถัดไป)
   const pickedCorrectOption = picked ? current?.options.find((o) => o.id === picked && o.correct) : undefined;
-  const hasLimit = limit > 0;
-  const remaining = hasLimit ? Math.max(0, limit - elapsed) : null;
-  const lowTime = remaining !== null && remaining <= LOW_TIME_S;
   const jigsawRemaining = Math.max(0, jigsawLimit - jigsawElapsed);
   const jigsawLowTime = jigsawRemaining <= LOW_TIME_S;
   // จิ๊กซอถูกตั้งเป็นเกมที่สอง (ปิดท้าย) — ไม่มี "เกมถัดไป" ให้ไปต่อแล้วหลังจิ๊กซอรอบนี้จบ
   const jigsawIsSecondGame = game.firstGame === "quiz" && jigsawLimit > 0;
   const score = results.filter(Boolean).length;
   const playableCount = game.pairs.filter(isPairComplete).length;
-  const requiredOf = (n: number) => Math.ceil((n * game.passPercent) / 100);
   const preloadSrc = current?.pair.answerVideo ?? rounds[index + 1]?.pair.video;
   // ตอนถูกฝัง: ส่งผลไปแล้ว (กำลังรอ/ได้ ack) → ให้จอจัดการต่อ
   const resultHandedOff = embedded && (portalStatus === "sending" || portalStatus === "sent");
@@ -469,21 +428,17 @@ export function PlayPage() {
     setPhase("playing");
   }
 
-  // จบเกม: หยุดเวลา คิดผล ส่ง portal · คะแนน = ข้อที่ตอบถูกแล้ว (ไม่สนว่ากี่ครั้ง) · ข้อที่ยังตอบไม่ถูกตอนหมดเวลา นับว่าผิด
-  function finish(finalResults: boolean[], timeout: boolean) {
+  // จบเกม (ตอบถูกครบทุกข้อแล้ว): หยุดเวลา ส่ง portal · ไม่จำกัดเวลา → ผ่านเสมอ score 100
+  function finish(finalResults: boolean[]) {
     if (!game || reportedRef.current) return;
     reportedRef.current = true;
     if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
-    const s = finalResults.filter(Boolean).length;
-    const required = requiredOf(total);
-    const passed = s >= required;
     setPhase("finished");
     setPicked(null);
     setRetryPrompt(false);
     setAnswerPlaying(false);
-    setSummary({ score: s, total, required, passed, timeout, timeUsed: hasLimit ? Math.min(elapsedRef.current, limit) : elapsedRef.current });
-    // score ที่ส่ง portal = % ของข้อที่ตอบถูก จำนวนเต็ม 0–100 (STATION_ACTIVITY.md 3.1) — หน้าสรุปยังแสดงเป็นจำนวนข้อ
-    report({ result: passed ? "pass" : "fail", score: total > 0 ? Math.round((100 * s) / total) : 0 });
+    setSummary({ score: finalResults.filter(Boolean).length, total, timeUsed: elapsedRef.current });
+    report({ result: "pass", score: 100 });
     // จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) → ส่งผลไป portal ไปแล้วด้านบน (ไม่รอ ack) แล้วค่อยขึ้นนับถอยหลังต่อเองหลังให้เห็นผลแป๊บนึง
     if (game.firstGame === "quiz" && game.jigsawTimeLimitSeconds > 0) {
       advanceTimerRef.current = window.setTimeout(() => {
@@ -525,7 +480,7 @@ export function PlayPage() {
   function advance(finalResults: boolean[]) {
     setAnswerPlaying(false);
     if (index + 1 >= total) {
-      finish(finalResults, false);
+      finish(finalResults);
       return;
     }
     setIndex(index + 1);
@@ -666,19 +621,6 @@ export function PlayPage() {
     // เว้นเป็น px คงที่ (ปุ่มของ portal ไม่ได้ขยายตาม html.f1-play-scale เหมือนหน้านี้)
     <div className={cn("f1-paper-bg flex h-dvh flex-col overflow-hidden", embedded && PORTAL_BOTTOM_GAP)}>
       <F1Header />
-      {/* แถบเวลาบาง ๆ ใต้ header */}
-      <div className="h-[3px] w-full shrink-0 bg-zinc-200 lg:h-1.5">
-        {remaining !== null && (
-          // ย่อด้วย transform (ไม่ต้องคำนวณ layout ใหม่ทุกวินาที — เบากว่าบน Pi)
-          <div
-            className={cn(
-              "h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear",
-              lowTime && clockRunning ? "f1-timer-blink bg-f1-wrong" : "bg-f1-brand",
-            )}
-            style={{ transform: `scaleX(${remaining / limit})` }}
-          />
-        )}
-      </div>
 
       <main className="mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col gap-3 px-3 py-3 sm:px-6 lg:gap-4 lg:px-10">
         <div className="flex shrink-0 items-center gap-3 sm:gap-4">
@@ -694,7 +636,7 @@ export function PlayPage() {
               </p>
             )}
           </div>
-          <RaceClock remaining={remaining} elapsed={elapsed} limit={limit} running={clockRunning} />
+          <RaceClock elapsed={elapsed} running={clockRunning} />
         </div>
 
         {phase === "idle" && (
@@ -713,15 +655,7 @@ export function PlayPage() {
                 <li>• ต้องตอบให้ถูกถึงจะไปข้อถัดไป ตอบผิดได้ตอบใหม่เรื่อย ๆ</li>
                 <li>• ข้อที่มี VDO ประกอบ จะเล่นวนให้ดูตลอดโดยไม่ต้องรอ</li>
                 {game.pairs.some((p) => isPairComplete(p) && p.answerVideo) && <li>• ตอบถูกแล้ว บางข้อมี VDO เฉลยให้ดูก่อนไปข้อถัดไป</li>}
-                <li>
-                  {limit > 0 ? (
-                    <>
-                      • มีเวลา {formatTime(limit)} — ต้องตอบถูกอย่างน้อย {requiredOf(playableCount)} ข้อ ({game.passPercent}%) ก่อนหมดเวลาถึงจะผ่าน
-                    </>
-                  ) : (
-                    <>• ตอบถูกครบทุกข้อ = ผ่าน</>
-                  )}
-                </li>
+                <li>• ไม่จำกัดเวลา ตอบถูกครบทุกข้อ = ผ่าน</li>
               </ul>
               <Button
                 size="lg"
@@ -758,9 +692,7 @@ export function PlayPage() {
               {jigsawIsSecondGame ? (
                 // จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) — จบกิจกรรมแล้ว ไม่มีเกมถัดไป
                 embedded ? (
-                  <p className="text-lg text-f1-mute lg:text-2xl">
-                    {summary?.passed ? "ผ่านแล้ว — จอจะไปสถานีถัดไปเอง" : "จอจะโหลดเกมใหม่ให้ลองอีกครั้ง"}
-                  </p>
+                  <p className="text-lg text-f1-mute lg:text-2xl">ผ่านแล้ว — จอจะไปสถานีถัดไปเอง</p>
                 ) : (
                   <>
                     <p className="text-lg text-f1-ink-2 lg:text-2xl">จบกิจกรรมแล้ว</p>
@@ -926,7 +858,7 @@ export function PlayPage() {
       )}
 
       {/* summary ไม่เคลียร์ทันทีตอนจิ๊กซอเป็นเกมที่สอง (เอาไว้ให้หน้าจิ๊กซอขึ้น pass/fail ต่อได้) — โชว์ modal/confetti นี้เฉพาะตอนยังอยู่ phase "finished" จริง ๆ */}
-      {phase === "finished" && summary?.passed && <Confetti />}
+      {phase === "finished" && summary && <Confetti />}
 
       {phase === "finished" && summary && (
         <div
@@ -940,21 +872,11 @@ export function PlayPage() {
             <p className="text-center text-sm font-medium tracking-widest text-f1-brand-ink lg:text-xl">
               <Trophy className="inline size-4 align-text-bottom lg:size-7" /> RACE RESULT • สรุปผล
             </p>
-            {summary.timeout && <p className="mt-1 text-center text-base font-bold text-f1-wrong lg:text-3xl">หมดเวลา!</p>}
             <p className="mt-1 text-center">
-              {/* ตรา PASS/FAIL ปั๊มลงมา */}
-              <span
-                className={cn(
-                  "f1-stamp text-6xl font-black tracking-wider lg:text-8xl",
-                  summary.passed ? "text-f1-brand-ink" : "text-f1-wrong",
-                )}
-              >
-                {summary.passed ? "PASS" : "FAIL"}
-              </span>
+              {/* ตรา PASS ปั๊มลงมา */}
+              <span className="f1-stamp text-6xl font-black tracking-wider text-f1-brand-ink lg:text-8xl">PASS</span>
             </p>
-            <p className="f1-rise-in mt-1 text-center text-base text-f1-mute [animation-delay:450ms] lg:text-2xl">
-              {summary.passed ? "ผ่านเส้นชัย! ยอดเยี่ยม" : `ต้องตอบถูกอย่างน้อย ${summary.required} ข้อถึงจะผ่าน`}
-            </p>
+            <p className="f1-rise-in mt-1 text-center text-base text-f1-mute [animation-delay:450ms] lg:text-2xl">ผ่านเส้นชัย! ยอดเยี่ยม</p>
 
             {embedded && portalStatus !== "idle" && (
               <div
@@ -1033,26 +955,17 @@ export function PlayPage() {
               })}
             </ol>
 
-            {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ: ผ่าน → สถานีถัดไป, ไม่ผ่าน → โหลดเกมใหม่ */}
+            {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ (สถานีถัดไป) */}
             {resultHandedOff && (
-              <p className="mt-4 text-center text-base font-medium text-f1-mute lg:mt-6 lg:text-2xl">
-                {summary.passed ? "ผ่านแล้ว — จอจะไปสถานีถัดไปเอง" : "จอจะโหลดเกมใหม่ให้ลองอีกครั้ง"}
-              </p>
+              <p className="mt-4 text-center text-base font-medium text-f1-mute lg:mt-6 lg:text-2xl">ผ่านแล้ว — จอจะไปสถานีถัดไปเอง</p>
             )}
 
             {/* จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) → ไม่ต้องมีปุ่มตรงนี้ จะขึ้นนับถอยหลังต่อเอง (ดู finish()) */}
             {!embedded && !jigsawIsSecondGame && (
               <div className="f1-rise-in mt-5 flex justify-center [animation-delay:900ms] lg:mt-8">
-                {/* ผ่าน → กลับหน้าหลัก (หน้าเริ่มเกม) · ไม่ผ่าน → เล่นใหม่ทันที */}
-                {summary.passed ? (
-                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={goHome}>
-                    <Home className="lg:size-7" /> กลับไปหน้าหลัก
-                  </Button>
-                ) : (
-                  <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={startGame}>
-                    <RotateCcw className="lg:size-7" /> เล่นใหม่
-                  </Button>
-                )}
+                <Button className="f1-press h-12 bg-f1-brand px-6 text-lg text-f1-on-brand hover:bg-f1-brand-dark lg:h-16 lg:rounded-xl lg:px-10 lg:text-2xl" onClick={goHome}>
+                  <Home className="lg:size-7" /> กลับไปหน้าหลัก
+                </Button>
               </div>
             )}
           </div>

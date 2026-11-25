@@ -425,35 +425,13 @@ html.f1-play-scale {
   animation: f1-pop-in 0.25s ease-out;
 }
 
-/* นาฬิกาเหลือ ≤ 10 วิ: กรอบเต้นเป็นจังหวะสีแดง */
-@keyframes f1-clock-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.04); }
-}
-.f1-clock-pulse {
-  position: relative;
-  animation: f1-clock-pulse 0.8s ease-in-out infinite;
-  will-change: transform;
-}
-.f1-clock-pulse::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 1.75rem 0.5rem rgba(220, 0, 0, 0.85);
-  pointer-events: none;
-  animation: f1-pulse-opacity 0.8s ease-in-out infinite;
-  will-change: opacity;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .f1-burst-piece,
   .f1-burst-ring,
   .f1-car-zoom {
     display: none;
   }
-  .f1-pop-in,
-  .f1-clock-pulse {
+  .f1-pop-in {
     animation: none;
   }
 }
@@ -504,8 +482,7 @@ html.f1-play-scale {
   .f1-confetti-piece {
     display: none;
   }
-  .f1-glow::after,
-  .f1-clock-pulse::after {
+  .f1-glow::after {
     animation: none;
     opacity: 0.6;
   }
@@ -515,9 +492,7 @@ html.f1-play-scale {
    ให้ CPU/GPU ของ Pi 4 เหลือไว้ถอดรหัส VDO เต็มที่ */
 html.f1-video-playing .f1-glow,
 html.f1-video-playing .f1-glow::after,
-html.f1-video-playing .f1-timer-blink,
-html.f1-video-playing .f1-clock-pulse,
-html.f1-video-playing .f1-clock-pulse::after {
+html.f1-video-playing .f1-timer-blink {
   animation-play-state: paused;
 }
 
@@ -537,10 +512,8 @@ html.f1-lite .f1-icon-pop,
 html.f1-lite .f1-bump,
 html.f1-lite .f1-dot-pop,
 html.f1-lite .f1-glow,
-html.f1-lite .f1-clock-pulse,
 html.f1-lite .f1-timer-blink,
-html.f1-lite .f1-glow::after,
-html.f1-lite .f1-clock-pulse::after {
+html.f1-lite .f1-glow::after {
   animation: none;
 }
 html.f1-lite .f1-checkered-flash,

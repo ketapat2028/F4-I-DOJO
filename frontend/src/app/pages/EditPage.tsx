@@ -639,37 +639,6 @@ export function EditPage() {
             </div>
             <span className="block text-xs text-f1-mute">ใช้ไม่ได้ถ้าเวลาต่อจิ๊กซอ = 0 (ข้ามเฟสจิ๊กซอไปเลยทุกกรณี)</span>
           </div>
-          <label className="space-y-1 text-sm text-zinc-700">
-            <span>จำกัดเวลา (วินาที, 0 = ไม่จำกัด)</span>
-            <Input
-              type="number"
-              min={0}
-              value={game.timeLimitSeconds}
-              onChange={(e) =>
-                setGame({ ...game, timeLimitSeconds: Math.max(0, Number(e.target.value) || 0) })
-              }
-              className="border-[#8B8B95] bg-white text-f1-ink"
-            />
-            <span className="block text-xs text-f1-mute">เวลารวมทั้งเกม · หยุดเดินระหว่างเล่น VDO</span>
-          </label>
-          <label className="space-y-1 text-sm text-zinc-700">
-            <span>เกณฑ์ผ่าน (% ของจำนวนข้อ ปัดขึ้น)</span>
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              value={game.passPercent}
-              onChange={(e) =>
-                setGame({ ...game, passPercent: Math.min(100, Math.max(1, Math.round(Number(e.target.value) || 1))) })
-              }
-              className="border-[#8B8B95] bg-white text-f1-ink"
-            />
-            <span className="block text-xs text-f1-mute">
-              ตอนนี้ต้องตอบถูกอย่างน้อย{" "}
-              {Math.ceil((game.pairs.filter(isPairComplete).length * game.passPercent) / 100)} จาก{" "}
-              {game.pairs.filter(isPairComplete).length} ข้อ
-            </span>
-          </label>
           <div className="space-y-2 text-sm text-zinc-700 sm:col-span-2">
             <span className="flex items-center gap-1.5">
               <Palette className="size-4 text-f1-brand-ink" /> สีธีม
