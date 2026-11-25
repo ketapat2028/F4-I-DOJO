@@ -692,7 +692,7 @@ export function PlayPage() {
               {jigsawIsSecondGame ? (
                 // จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) — จบกิจกรรมแล้ว ไม่มีเกมถัดไป
                 embedded ? (
-                  <p className="text-lg text-f1-mute lg:text-2xl">ผ่านแล้ว — จอจะไปสถานีถัดไปเอง</p>
+                  <p className="text-lg text-f1-mute lg:text-2xl">ผ่านแล้ว — จอจะไปต่อเอง</p>
                 ) : (
                   <>
                     <p className="text-lg text-f1-ink-2 lg:text-2xl">จบกิจกรรมแล้ว</p>
@@ -955,9 +955,9 @@ export function PlayPage() {
               })}
             </ol>
 
-            {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ (สถานีถัดไป) */}
+            {/* บนจอ Station ส่งผลแล้วจอเป็นคนไปต่อ (กิจกรรมถัดไปของ Station หรือ Station ถัดไป) */}
             {resultHandedOff && (
-              <p className="mt-4 text-center text-base font-medium text-f1-mute lg:mt-6 lg:text-2xl">ผ่านแล้ว — จอจะไปสถานีถัดไปเอง</p>
+              <p className="mt-4 text-center text-base font-medium text-f1-mute lg:mt-6 lg:text-2xl">ผ่านแล้ว — จอจะไปต่อเอง</p>
             )}
 
             {/* จิ๊กซอเป็นเกมที่สอง (ปิดท้าย) → ไม่ต้องมีปุ่มตรงนี้ จะขึ้นนับถอยหลังต่อเอง (ดู finish()) */}

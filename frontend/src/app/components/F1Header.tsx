@@ -28,6 +28,9 @@ export function F1Header() {
             <Link to="/convert" className="hover:text-white">
               แปลง VDO
             </Link>
+            <Link to="/gpio" className="hover:text-white">
+              GPIO
+            </Link>
           </nav>
         </div>
       </header>

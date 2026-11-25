@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { setupGpio, createGpioRouter } = require('./gpio');
 
 const app = express();
 
@@ -141,7 +142,7 @@ async function initDB() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
-  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, timeLimitSeconds, passPercent, brandColor?, pairs: [SpecRecord] }
+  // ชุดคำถามของเกม (มีชุดเดียว) — data = { name, jigsawTimeLimitSeconds, firstGame, brandColor?, pairs: [SpecRecord] }
   await query(`
     CREATE TABLE IF NOT EXISTS game (
       singleton  TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,
@@ -158,7 +159,15 @@ async function initDB() {
       uploaded_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  console.log('DB ready — records, app_config, game & images tables ensured');
+  // ตั้งค่าหน้า GPIO (ชื่อขา + กล้องตรวจ OK/NG) — ดู gpio.js normalizeConfig
+  await query(`
+    CREATE TABLE IF NOT EXISTS gpio_config (
+      singleton  TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,
+      data       TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+  console.log('DB ready — records, app_config, game, images & gpio_config tables ensured');
 }
 
 // ========== API ROUTES ==========
@@ -302,6 +311,10 @@ app.post('/api/app-config', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ========== GPIO (หน้า /I-DOJO/gpio) ==========
+// สั่งขาผ่าน raspi-gpio · เครื่องที่ไม่มี raspi-gpio หรือ GPIO_MOCK=1 = ขาจำลอง · ปิดโปรแกรมแล้วคืนค่าขาเดิม
+app.use('/api/gpio', createGpioRouter({ query, ready: setupGpio() }));
 
 // ========== START ==========
 const PORT = process.env.PORT || 5000;

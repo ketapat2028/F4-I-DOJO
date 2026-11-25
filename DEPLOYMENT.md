@@ -33,7 +33,7 @@
 ## Backend
 
 - Entry: `backend/index.js`
-- ตอนเริ่มจะสร้างตาราง `records`, `app_config`, `game` และ `images` เองถ้ายังไม่มี
+- ตอนเริ่มจะสร้างตาราง `records`, `app_config`, `game`, `images` และ `gpio_config` เองถ้ายังไม่มี
 - ชุดคำถามของเกมเก็บในตาราง `game` (แถวเดียว, JSON) ผ่าน `GET /api/game` (404 = ยังไม่มี) และ `PUT /api/game`
 - รูปที่อัปโหลดจากหน้า editor เก็บเป็น `LONGBLOB` ในตาราง `images` (ไม่เขียนไฟล์ลงดิสก์) — `POST /api/upload` (field `image`, `.jpg .jpeg .png .gif .webp` ไม่เกิน 10MB) คืน `{ id }` แล้ว question/answer เก็บ URL `/I-DOJO/api/images/<id>`, เปิดรูปผ่าน `GET /api/images/:id` (ไม่ต้องใช้รหัส) · ไฟล์ผิดชนิด/ใหญ่เกินได้ 400 JSON `{error}` ภาษาไทย · รูปอยู่ใน DB แล้ว **backup DB อย่างเดียวได้รูปครบ** แต่ DB จะโตตามจำนวนรูป และรูปที่เลิกใช้ไม่ถูกลบอัตโนมัติ
 - VDO ของแต่ละข้อเก็บเป็น**ไฟล์**ใน `backend/videos/` (ใหญ่เกินจะเก็บใน DB) — `POST /api/upload-video` (field `video`, `.mp4 .m4v .webm .ogv` ไม่เกิน 300MB) คืน `{ filename }` แล้วข้อนั้นเก็บ URL `/I-DOJO/api/videos/<filename>` เสิร์ฟแบบ static (รองรับ Range) · **backup ต้องเอาโฟลเดอร์ `backend/videos/` ไปด้วย** · ถ้า Apache ตั้ง `LimitRequestBody` หรือ `ProxyTimeout` ไว้ต่ำ ต้องเพิ่มให้รับไฟล์ 300MB ได้ · ไฟล์ที่เลิกใช้ไม่ถูกลบอัตโนมัติ
@@ -55,6 +55,15 @@ DB_NAME=pit5_station
 - `backend/uploads/` เหลือไว้เสิร์ฟแบบ static เผื่อชุดคำถามเก่าที่ยังอ้างอิงไฟล์อยู่ (`/I-DOJO/api/uploads/<file>`, อ้างจากที่อยู่ของ `index.js`) แต่รูปที่อัปโหลดใหม่ทั้งหมดเก็บในตาราง `images` แล้ว ไม่ได้เขียนไฟล์เพิ่มอีก
 - Express ยังเสิร์ฟ `backend/build` ที่ `/I-DOJO` ด้วย (ไว้ทดสอบตรง port 5000 โดยไม่มี Apache) และตัด `/I-DOJO` ออกจาก `/I-DOJO/api/...` เองแบบเดียวกับ Apache — บน Pi ส่วนนี้ Apache เสิร์ฟเอง
 - เกมถูกฝังเป็น iframe บนจอ Station ของ portal — **ห้ามเพิ่ม `X-Frame-Options` หรือ CSP `frame-ancestors`** ใน Apache (ดู `PORTAL_INTEGRATION.md`)
+
+### GPIO (หน้า `/I-DOJO/gpio`)
+
+- `backend/gpio.js` สั่งขาผ่านคำสั่ง `raspi-gpio` (มีใน Raspberry Pi OS อยู่แล้ว) → **user ที่รัน PM2 ต้องอยู่กลุ่ม `gpio`** เช็คด้วย `groups` (Pi สถานีที่ `192.168.3.95` รันเป็น `pi` ซึ่งอยู่กลุ่ม `gpio` แล้ว) · ไม่ต้องลง package เพิ่ม
+- route `GET /api/gpio` (สถานะทุกขา + log), `POST /api/gpio/pin/:n/{high|low|input|pulse|release}`, `POST /api/gpio/release-all`, `POST /api/gpio/edges/clear`, `GET`/`PUT /api/gpio/config` (ตาราง `gpio_config`: ชื่อขา + ตั้งค่ากล้อง), `POST /api/gpio/inspect` (สั่งกล้องถ่ายรูปตรวจ รอขา OK/NG)
+- ไม่แตะขาไหนจนกว่าจะสั่งจากหน้าเว็บ · `pm2 restart` / `stop` แล้วขาที่สั่งไว้จะคืนค่าเดิม (ค่าตอน backend เริ่ม)
+- เครื่องที่ไม่มี `raspi-gpio` หรือตั้ง `GPIO_MOCK=1` ใน `.env` = ขาจำลอง (หน้าเว็บขึ้นป้าย "ขาจำลอง")
+- ไม่มีการตรวจสิทธิ์เหมือน route อื่น — ใครเข้าหน้าเว็บได้ก็สั่งขาได้ (มีแค่สวิตช์ "ปลดล็อกสั่งขา" กันกดพลาด)
+- **ห้ามรันโปรแกรมอื่นที่สั่งขาเดียวกันพร้อมกัน** · เครื่องมือเดิม `~/gpio_trigger/gpio_trigger.py` (พอร์ต 8090) ถูกแทนด้วยหน้านี้และลบออกจาก Pi แล้ว (2026-11-25)
 
 ## Apache config
 
@@ -119,6 +128,7 @@ pm2 startup systemd   # แล้วรันคำสั่ง sudo ที่�
 ```bash
 grep -o 'src="[^"]*"' backend/build/index.html   # ต้องเห็น /I-DOJO/assets/...
 curl -I http://localhost/I-DOJO/                  # ต้องได้ 200
+curl -s http://localhost/I-DOJO/api/gpio | head -c 80   # ต้องขึ้น {"driver":"raspi-gpio",...
 pm2 logs pit5_station --lines 20
 ```
 

@@ -251,7 +251,7 @@ export function TimerPage() {
                 )}
                 {portalStatus === "sent" && (
                   <>
-                    <Check className="f1-icon-pop size-4 lg:size-7" /> ส่งผลไปที่จอสำเร็จ — จอจะไปสถานีถัดไปเอง
+                    <Check className="f1-icon-pop size-4 lg:size-7" /> ส่งผลไปที่จอสำเร็จ — จอจะไปต่อเอง
                   </>
                 )}
                 {portalStatus === "error" && (
