@@ -187,19 +187,19 @@ headless Chrome ลด CPU 4 เท่า (ประมาณ Pi 4) เล่น
 
 ## 5. VDO — ตรวจ แปลง แล้วค่อยอัปโหลด
 
-Pi 4 + Chromium ถอดรหัสด้วยฮาร์ดแวร์ได้แค่ **MP4 H.264 ≤ 1920×1080** (แนวตั้ง ≤ 1080×1920) — HEVC/VP9/AV1/4K = CPU = กระตุก
+เดิมเข้าใจว่า Pi 4 + Chromium ถอดรหัสด้วยฮาร์ดแวร์ได้ถึง H.264 1080p — **วัดจริงบน Pi สถานี (64-bit Bullseye, Chromium 104) 2026-11-26 เป็น CPU ทั้งหมด** (`chrome://gpu`: `Video Decode: Software only`) · 1080p ทิ้งเฟรม/เล่นช้ากว่าเวลาจริง, 720p ลื่น → **เป้าหมายตอนนี้ MP4 H.264 ≤ 1280×720** (แนวตั้ง ≤ 720×1280) · HEVC/VP9/AV1 ยังห้ามเหมือนเดิม
 สเปกเต็ม + ตั้งค่า Pi ดู `VIDEO_GUIDE.md` (ก๊อปไปแล้วเปลี่ยน IP)
 
 ### 5.1 ตรวจไฟล์ — `utils/videoCheck.ts` (ก๊อปทั้งไฟล์)
 `inspectVideo(file): Promise<string[]>` คืนคำเตือนภาษาไทย (ว่าง = ผ่าน) อ่านในเบราว์เซอร์ล้วน:
-อ่านกล่อง MP4 ชั้นบน (`moov` ก่อน `mdat` = faststart) · หา fourcc ใน `moov` (`avc1` ผ่าน · `hvc1/hev1/vp09/av01/mp4v` เตือน) · `.webm/.ogv` เตือน · โหลด metadata เตือน > 1920×1080 หรือ > 8 Mbps
+อ่านกล่อง MP4 ชั้นบน (`moov` ก่อน `mdat` = faststart) · หา fourcc ใน `moov` (`avc1` ผ่าน · `hvc1/hev1/vp09/av01/mp4v` เตือน) · `.webm/.ogv` เตือน · โหลด metadata เตือน > 1280×720 หรือ > 5 Mbps
 
 ### 5.2 แปลงในเบราว์เซอร์ — `utils/videoConvert.ts` (ก๊อปทั้งไฟล์)
 ```bash
 cd frontend && npm install --save-exact mediabunny@1.62.1
 ```
 - `convertForPi(file, { onProgress, signal })` → `{ file: <ชื่อ>_pi.mp4, reencoded, from, to }`
-  - ผลลัพธ์: H.264 · ย่อให้พอดี 1920×1080 / 1080×1920 ไม่ขยาย · ≤ 30fps · ~5 Mbps แต่**ไม่เกิน bitrate เดิม** · AAC (เครื่องไม่มี AAC encoder → Opus) · `fastStart: 'in-memory'` · keyframe ทุก 2 วิ
+  - ผลลัพธ์: H.264 · ย่อให้พอดี 1280×720 / 720×1280 ไม่ขยาย · ≤ 30fps · ~2.5 Mbps แต่**ไม่เกิน bitrate เดิม** · AAC (เครื่องไม่มี AAC encoder → Opus) · `fastStart: 'in-memory'` · keyframe ทุก 2 วิ
   - ต้นฉบับเป็น H.264 อยู่แล้ว ขนาด/fps/bitrate ไม่เกิน → **ไม่เข้ารหัสใหม่** แค่จัดไฟล์ใหม่ (0.2 วิ ไม่เสียคุณภาพ)
 - `canConvertVideo()` / `convertUnavailableReason()` — เช็ค WebCodecs + secure context แล้วบอกวิธีแก้เป็นภาษาไทย
 - `import("mediabunny")` แบบ dynamic → แยก chunk (~750 kB) โหลดเฉพาะตอนแปลง หน้าเกมไม่หนักขึ้น

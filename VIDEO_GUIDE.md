@@ -5,15 +5,15 @@ Pi 4 แรงพอถ้า **ไฟล์ VDO ถูกแบบ** และ 
 
 ## 1. สเปก VDO ที่เล่นลื่นบน Pi 4
 
-Pi 4 มีตัวถอดรหัสฮาร์ดแวร์ที่ Chromium ใช้ได้แค่ **H.264 ไม่เกิน 1080p** — แบบอื่นต้องถอดด้วย CPU แล้วกระตุก
+**Chromium บน Pi สถานี (Raspberry Pi OS 64-bit Bullseye, Chromium 104) ถอดรหัส VDO ด้วย CPU ไม่ใช้ชิปวิดีโอ** — `chrome://gpu` ขึ้น `Video Decode: Software only` และตอนเล่นไม่ได้เปิด `/dev/video10` (วัดบน `192.168.3.95` 2026-11-26) · 1080p ถอดไม่ทัน: ทิ้ง 4–9 เฟรมใน ~2 วิ และเล่นช้ากว่าเวลาจริง · **720p ไม่ทิ้งเฟรมเลย** → ใช้ **H.264 ไม่เกิน 720p**
 
 | รายการ | ใช้ | ห้าม / เลี่ยง |
 |---|---|---|
 | ไฟล์ | `.mp4` | `.webm`, `.ogv`, `.mov` |
 | codec ภาพ | **H.264** (High profile, level 4.1) | H.265/HEVC, VP9, AV1 |
-| ขนาดภาพ | ไม่เกิน **1920×1080** (แนวตั้งไม่เกิน 1080×1920) | 4K (3840×2160) |
+| ขนาดภาพ | ไม่เกิน **1280×720** (แนวตั้งไม่เกิน 720×1280) | 1080p ขึ้นไป |
 | เฟรมเรต | ไม่เกิน 30 fps | 60 fps |
-| bitrate | ประมาณ 2–6 Mbps | เกิน 8 Mbps |
+| bitrate | ประมาณ 1.5–3 Mbps | เกิน 5 Mbps |
 | เสียง | AAC | — |
 | faststart | ต้องมี (หัวไฟล์อยู่ต้นไฟล์ → เริ่มเล่นทันที) | — |
 
@@ -25,7 +25,7 @@ Pi 4 มีตัวถอดรหัสฮาร์ดแวร์ที่ Ch
 
 **VDO ของ portal — หน้า `/I-DOJO/convert` (แปลง VDO)** ลากไฟล์มาวาง (หลายไฟล์ได้) → รอแปลง → กดดาวน์โหลด `<ชื่อ>_pi.mp4` → เอาไปอัปโหลดในหน้า Admin ของ portal · ทำในเครื่องนี้ ไม่ส่งไฟล์ไปไหน
 
-ทั้งสองแบบใช้ **WebCodecs ของ Chrome/Edge** (ใช้การ์ดจอของ PC) ได้ H.264 ไม่เกิน 1920×1080 (แนวตั้ง 1080×1920, ไม่ขยายไฟล์เล็ก), ไม่เกิน 30 fps, ~5 Mbps (ไม่เกิน bitrate เดิม), AAC, faststart · VDO 4K ยาว 16 วิ ใช้เวลาประมาณ 1 นาทีบนเครื่องทดสอบที่ไม่มีการ์ดจอ (PC ที่มีการ์ดจอเร็วกว่านี้)
+ทั้งสองแบบใช้ **WebCodecs ของ Chrome/Edge** (ใช้การ์ดจอของ PC) ได้ H.264 ไม่เกิน 1280×720 (แนวตั้ง 720×1280, ไม่ขยายไฟล์เล็ก), ไม่เกิน 30 fps, ~2.5 Mbps (ไม่เกิน bitrate เดิม), AAC, faststart · VDO 4K ยาว 16 วิ ใช้เวลาประมาณ 1 นาทีบนเครื่องทดสอบที่ไม่มีการ์ดจอ (PC ที่มีการ์ดจอเร็วกว่านี้)
 
 > **ตั้งค่าครั้งเดียวบน PC ผู้ดูแล:** เบราว์เซอร์ยอมให้แปลง VDO เฉพาะหน้าที่เป็น https หรือ localhost — เกมเปิดผ่าน `http://192.168.2.28` จึงต้องอนุญาตก่อน
 > 1. Chrome เปิด `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (Edge: `edge://flags/#unsafely-treat-insecure-origin-as-secure`)
@@ -34,8 +34,8 @@ Pi 4 มีตัวถอดรหัสฮาร์ดแวร์ที่ Ch
 > ยังไม่ตั้ง หน้าเว็บจะขึ้นกล่องแดงบอกวิธีนี้ (หน้า editor ยังให้กด "อัปโหลดไฟล์เดิมไปก่อน" ได้)
 
 **ทางสำรอง** (ไฟล์ที่เบราว์เซอร์อ่านไม่ได้ เช่น HEVC บนเครื่องที่การ์ดจอไม่รองรับ):
-- `tools/convert-video.bat` — ลง ffmpeg ครั้งเดียว `winget install Gyan.FFmpeg` แล้วลากไฟล์ไปวางบน .bat ได้ `<ชื่อเดิม>_pi.mp4` (H.264 High@4.1, ≤1080p, ≤30fps, ~6 Mbps, AAC, faststart)
-- HandBrake (ฟรี มีหน้าจอ): Preset **General → Fast 1080p30** · ติ๊ก **Web Optimized** · Format MP4
+- `tools/convert-video.bat` — ลง ffmpeg ครั้งเดียว `winget install Gyan.FFmpeg` แล้วลากไฟล์ไปวางบน .bat ได้ `<ชื่อเดิม>_pi.mp4` (H.264 High@4.1, ≤720p, ≤30fps, ~3 Mbps, AAC, faststart)
+- HandBrake (ฟรี มีหน้าจอ): Preset **General → Fast 720p30** · ติ๊ก **Web Optimized** · Format MP4
 
 ## 3. ตั้งค่า Pi 4 ของจอ Station
 
@@ -45,7 +45,7 @@ Pi 4 มีตัวถอดรหัสฮาร์ดแวร์ที่ Ch
    - ผ่านหน้าจอ: เมนู → Preferences → Screen Configuration → เลือก 1920x1080 / 60Hz
    - หรือคำสั่ง (Wayland): `wlr-randr --output HDMI-A-1 --mode 1920x1080@60`
    - หรือถาวร: เติม `video=HDMI-A-1:1920x1080@60` ต่อท้ายบรรทัดเดียวใน `/boot/firmware/cmdline.txt` แล้ว reboot
-2. **ใช้ Chromium จาก repo ของ Raspberry Pi OS** (`sudo apt install chromium` หรือ `chromium-browser`) ไม่ใช่ snap/flatpak — ตัวของ Pi เปิดใช้ตัวถอดรหัสฮาร์ดแวร์ไว้แล้ว
+2. **ใช้ Chromium จาก repo ของ Raspberry Pi OS** (`sudo apt install chromium` หรือ `chromium-browser`) ไม่ใช่ snap/flatpak — ตัวของ Pi รุ่น 32-bit เปิดใช้ตัวถอดรหัสฮาร์ดแวร์ไว้ แต่บน 64-bit Bullseye (เครื่องสถานีตอนนี้) ยังเป็น CPU — เลยต้องใช้ VDO 720p
 3. **เช็คว่าใช้ฮาร์ดแวร์ถอดรหัสจริง**: เปิด VDO เล่นอยู่ในแท็บหนึ่ง แล้วเปิดอีกแท็บไปที่ `chrome://media-internals` → คลิกรายการ VDO → ดูค่า `kVideoDecoderName`
    - `V4L2VideoDecoder` (หรือชื่อที่มี V4L2) = ฮาร์ดแวร์ ✅
    - `FFmpegVideoDecoder` / `VpxVideoDecoder` / `Dav1dVideoDecoder` = CPU ❌ → ไฟล์ผิดสเปก (ข้อ 1) หรือ Chromium ไม่ใช่ตัวของ Pi (ข้อ 2)

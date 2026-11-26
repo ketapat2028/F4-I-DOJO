@@ -1,10 +1,10 @@
 // ตรวจไฟล์ VDO ก่อนอัปโหลด ว่าจะเล่นลื่นบนจอ Station (Raspberry Pi 4 + Chromium) ไหม — ดู VIDEO_GUIDE.md
-// Pi 4 ถอดรหัสด้วยฮาร์ดแวร์ได้เฉพาะ H.264 ไม่เกิน 1080p · codec อื่นหรือภาพใหญ่กว่านี้ใช้ CPU → กระตุก
+// Chromium บน Pi สถานี ถอดรหัส VDO ด้วย CPU (ไม่ใช้ชิปวิดีโอ) → เล่นลื่นแค่ H.264 ไม่เกิน 720p · 1080p ทิ้งเฟรม/เล่นช้ากว่าเวลาจริง
 // คืนคำเตือนภาษาไทย (ว่าง = ผ่าน) · แค่เตือน ไม่ขวางการอัปโหลด · อ่านไฟล์ไม่ออกก็ไม่เตือน
 
-const MAX_W = 1920;
-const MAX_H = 1080;
-const MAX_MBPS = 8;
+const MAX_W = 1280;
+const MAX_H = 720;
+const MAX_MBPS = 5;
 // moov ใหญ่กว่านี้ไม่อ่านทั้งก้อน (ปกติไม่กี่ MB)
 const MOOV_READ_LIMIT = 16 * 1024 * 1024;
 
@@ -111,7 +111,7 @@ export async function inspectVideo(file: File): Promise<string[]> {
     if (big) warnings.push(`ภาพใหญ่ ${meta.width}×${meta.height} — Pi เล่นได้ลื่นไม่เกิน ${MAX_W}×${MAX_H}`);
     if (Number.isFinite(meta.duration) && meta.duration > 0) {
       const mbps = (file.size * 8) / meta.duration / 1_000_000;
-      if (mbps > MAX_MBPS) warnings.push(`bitrate สูง ${mbps.toFixed(1)} Mbps — แนะนำไม่เกิน 6 Mbps`);
+      if (mbps > MAX_MBPS) warnings.push(`bitrate สูง ${mbps.toFixed(1)} Mbps — แนะนำไม่เกิน 3 Mbps`);
     }
   }
   return warnings;

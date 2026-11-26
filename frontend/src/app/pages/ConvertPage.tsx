@@ -86,7 +86,7 @@ export function ConvertPage() {
         <div>
           <h1 className="text-2xl font-bold">แปลง VDO ให้เล่นลื่นบนจอ Station</h1>
           <p className="mt-1 text-sm text-f1-ink-2">
-            จอ Station เป็น Raspberry Pi 4 เล่นลื่นเฉพาะ MP4 H.264 ไม่เกิน 1080p — หน้านี้แปลงให้ในเครื่องนี้ (ไม่อัปโหลดไปไหน)
+            จอ Station เป็น Raspberry Pi 4 เล่นลื่นเฉพาะ MP4 H.264 ไม่เกิน 720p — หน้านี้แปลงให้ในเครื่องนี้ (ไม่อัปโหลดไปไหน)
             แล้วกดดาวน์โหลดไฟล์ <code>_pi.mp4</code> ไปใช้ · ใช้กับ VDO ของ portal (หน้า Admin → station-videos) ได้ด้วย ·
             VDO ในเกมนี้ หน้าแก้ไขโจทย์แปลงให้อัตโนมัติอยู่แล้ว
           </p>

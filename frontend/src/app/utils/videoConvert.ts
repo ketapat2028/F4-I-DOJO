@@ -1,15 +1,16 @@
 // แปลง VDO ในเบราว์เซอร์ของ PC ผู้ดูแล ให้เล่นลื่นบนจอ Station (Raspberry Pi 4) — ดู VIDEO_GUIDE.md
-// ได้ MP4 · H.264 · ไม่เกิน 1920×1080 (แนวตั้ง 1080×1920, ไม่ขยายไฟล์เล็ก) · ไม่เกิน 30fps · ~5 Mbps · AAC · faststart
+// ได้ MP4 · H.264 · ไม่เกิน 1280×720 (แนวตั้ง 720×1280, ไม่ขยายไฟล์เล็ก) · ไม่เกิน 30fps · ~2.5 Mbps · AAC · faststart
+// 720p เพราะ Chromium บน Pi สถานี (64-bit Bullseye) ถอดรหัส VDO ด้วย CPU — 1080p ถอดไม่ทัน (ทิ้งเฟรม เล่นช้ากว่าเวลาจริง) วัดจริง 2026-11-26
 // ใช้ WebCodecs ของ Chrome/Edge (ใช้การ์ดจอของ PC) ผ่าน mediabunny — โหลดไลบรารีเฉพาะตอนแปลง (dynamic import)
 // ไฟล์ไม่ถูกส่งไปไหน ทำในเครื่องล้วน · ห้ามเรียกบน Pi (ช้ามาก)
 
-const MAX_LONG = 1920;
-const MAX_SHORT = 1080;
+const MAX_LONG = 1280;
+const MAX_SHORT = 720;
 const MAX_FPS = 30;
-const VIDEO_BPS = 5_000_000;
-const MIN_VIDEO_BPS = 1_500_000;
+const VIDEO_BPS = 2_500_000;
+const MIN_VIDEO_BPS = 1_000_000;
 // ต้นฉบับ H.264 bitrate เกินนี้ถึงจะเข้ารหัสใหม่ (ตรงกับเกณฑ์เตือนใน videoCheck.ts)
-const MAX_SOURCE_BPS = 8_000_000;
+const MAX_SOURCE_BPS = 5_000_000;
 const AUDIO_BPS = 128_000;
 
 export type ConvertResult = {
@@ -43,7 +44,7 @@ export function convertUnavailableReason(): string {
   return "เบราว์เซอร์นี้แปลง VDO ไม่ได้ — ใช้ Chrome หรือ Edge รุ่นใหม่ หรือใช้ tools/convert-video.bat แทน";
 }
 
-// ขนาดใหม่: ย่อให้พอดีกรอบ 1920×1080 (แนวตั้ง 1080×1920) ไม่ขยาย · เลขคู่เสมอ (H.264 ต้องการ)
+// ขนาดใหม่: ย่อให้พอดีกรอบ 1280×720 (แนวตั้ง 720×1280) ไม่ขยาย · เลขคู่เสมอ (H.264 ต้องการ)
 function fitSize(w: number, h: number): { width: number; height: number } {
   const portrait = h > w;
   const boxW = portrait ? MAX_SHORT : MAX_LONG;

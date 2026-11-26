@@ -43,6 +43,6 @@ npm run dev              # http://localhost:5173
 
 ชุดคำถามของเกมเก็บที่ backend (`/api/game`) แก้ได้ที่หน้า `/I-DOJO/editor` ด้วยรหัสผู้ดูแล (`ADMIN_SECRET`) · หน้าจับเวลา 5S BEFORE / AFTER อยู่ที่ `/I-DOJO/timed` · เช็คสัญญาณ GPIO ของ Pi (input สด, สั่ง output/pulse, กล้องตรวจ OK/NG) ที่ `/I-DOJO/gpio` · เกมถูกฝังเป็น iframe บนจอ Station ของ I-Dojo LPB portal ดู `PORTAL_INTEGRATION.md` · production บน Raspberry Pi ดู `DEPLOYMENT.md`
 
-VDO ต้องเป็น MP4 H.264 ไม่เกิน 1080p ถึงจะลื่นบนจอ Station (Pi 4) — หน้า editor แปลงให้เองตอนอัปโหลด, VDO ของ portal ใช้หน้า `/I-DOJO/convert` ดู `VIDEO_GUIDE.md` · ทำแบบเดียวกันกับเกมของ station อื่น ดู `STATION_UPGRADE.md`
+VDO ต้องเป็น MP4 H.264 ไม่เกิน 720p ถึงจะลื่นบนจอ Station (Chromium บน Pi ถอดรหัสด้วย CPU) — หน้า editor แปลงให้เองตอนอัปโหลด, VDO ของ portal ใช้หน้า `/I-DOJO/convert` ดู `VIDEO_GUIDE.md` · ทำแบบเดียวกันกับเกมของ station อื่น ดู `STATION_UPGRADE.md`
 
 `/api/records`, `/api/app-config` และหน้า `/dashboard` ยังเป็นโค้ดตัวอย่างจาก template

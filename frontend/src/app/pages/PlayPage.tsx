@@ -92,6 +92,8 @@ function setVideoPlaying(on: boolean) {
 function PromptVideo({ src }: { src: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [blocked, setBlocked] = useState(false);
+  // ยังไม่ได้ภาพแรก → ขึ้น "กำลังโหลด VDO" แทนกรอบดำเปล่า (Chromium บน Pi ถอดรหัสด้วย CPU เริ่มเล่นใช้เวลาสักพัก)
+  const [ready, setReady] = useState(false);
 
   function tryPlay() {
     const v = ref.current;
@@ -105,6 +107,7 @@ function PromptVideo({ src }: { src: string }) {
 
   // เปลี่ยนข้อ (src เปลี่ยน) → เล่นตัวใหม่ทันที · ออกจากข้อนี้ → เอา class ออก แอนิเมชันที่วนไม่หยุดกลับมาเล่นต่อ
   useEffect(() => {
+    setReady(false);
     tryPlay();
     return () => setVideoPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,12 +124,20 @@ function PromptVideo({ src }: { src: string }) {
         disablePictureInPicture
         controlsList="nodownload noplaybackrate noremoteplayback"
         onContextMenu={(e) => e.preventDefault()}
-        onPlaying={() => setVideoPlaying(true)}
+        onPlaying={() => {
+          setReady(true);
+          setVideoPlaying(true);
+        }}
         onPause={() => setVideoPlaying(false)}
         // ครอปเต็มกรอบเสมอ (object-cover) — กรอบขนาดไม่เท่าสัดส่วนวิดีโอ จะไม่มีแถบดำซ้าย-ขวา/บน-ล่าง
         // object-left: ครอปแล้วยึดฝั่งซ้ายของวิดีโอไว้เสมอ (ส่วนที่โดนตัดออกจะอยู่ขวา)
         className="h-full w-full object-cover object-left"
       />
+      {!ready && !blocked && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-base font-medium text-white/80 lg:text-2xl" role="status">
+          <Loader2 className="f1-video-spin size-8 animate-spin lg:size-12" /> กำลังโหลด VDO…
+        </div>
+      )}
       {blocked && (
         <button
           type="button"
@@ -373,7 +384,10 @@ export function PlayPage() {
   const jigsawIsSecondGame = game.firstGame === "quiz" && jigsawLimit > 0;
   const score = results.filter(Boolean).length;
   const playableCount = game.pairs.filter(isPairComplete).length;
-  const preloadSrc = current?.pair.answerVideo ?? rounds[index + 1]?.pair.video;
+  // ระหว่างตอบ: VDO เฉลยของข้อนี้ ไม่มีก็ VDO ข้อถัดไป · ก่อนเริ่ม (หน้าเริ่ม / นับถอยหลังจิ๊กซอ): VDO ข้อแรก กดเริ่มแล้วจะได้ไม่ต้องรอโหลด
+  const firstVideo = game.pairs.find(isPairComplete)?.video;
+  const preloadSrc =
+    phase === "playing" ? (current?.pair.answerVideo ?? rounds[index + 1]?.pair.video) : phase === "finished" || jigsawIsSecondGame && phase !== "idle" ? undefined : firstVideo;
   // ตอนถูกฝัง: ส่งผลไปแล้ว (กำลังรอ/ได้ ack) → ให้จอจัดการต่อ
   const resultHandedOff = embedded && (portalStatus === "sending" || portalStatus === "sent");
 
@@ -796,7 +810,7 @@ export function PlayPage() {
 
       {/* โหลด VDO ถัดไปล่วงหน้าระหว่างตอบข้อนี้ (ตัวเดียว: VDO เฉลยของข้อนี้ ถ้าไม่มีก็ VDO ข้อถัดไป) — ถึงตอนเล่นเริ่มทันที ไม่ต้องรอบัฟเฟอร์
           ไม่โหลดระหว่าง VDO เฉลยเล่น จะได้ไม่แย่งตัวถอดรหัส/เน็ต */}
-      {phase === "playing" && !answerPlaying && preloadSrc && (
+      {!answerPlaying && preloadSrc && (
         <video key={preloadSrc} src={preloadSrc} preload="auto" muted playsInline className="hidden" aria-hidden />
       )}
 

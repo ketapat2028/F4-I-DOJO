@@ -513,8 +513,15 @@ html.f1-lite .f1-bump,
 html.f1-lite .f1-dot-pop,
 html.f1-lite .f1-glow,
 html.f1-lite .f1-timer-blink,
+html.f1-lite .f1-video-spin,
 html.f1-lite .f1-glow::after {
   animation: none;
+}
+/* ไอคอนหมุน "กำลังโหลด VDO" (PromptVideo) — ลดการเคลื่อนไหว: ไอคอนนิ่ง ข้อความยังบอกอยู่ */
+@media (prefers-reduced-motion: reduce) {
+  .f1-video-spin {
+    animation: none;
+  }
 }
 html.f1-lite .f1-checkered-flash,
 html.f1-lite .f1-redflag-flash,
